@@ -64,7 +64,7 @@ namespace ErenshorCraftingExpanded
             }
 
             int shown = System.Math.Min(MaxChatEntries, report.Results.Count);
-            ChatLine("Top " + shown + " useful candidate(s), ranked by plant-scale bounds then distance (full details in BepInEx log):");
+            ChatLine("Top " + shown + " useful candidate(s), ranked by plant-scale bounds then distance (full details in the Lunaris log):");
             for (int i = 0; i < report.Results.Count; i++)
             {
                 RendererScanResult entry = report.Results[i];

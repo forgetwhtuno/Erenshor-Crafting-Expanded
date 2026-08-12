@@ -1,64 +1,56 @@
 <#
-  Convenience one-shot build+install. Unlike INSTALL_TEST.ps1 this intentionally performs NO
-  backup/restore bookkeeping, so it is not the recommended development path.
+.SYNOPSIS
+  One-shot build + install for Erenshor Crafting Expanded. NO backup is taken.
 
-  Safety rules:
-    - resolves exactly one install target; never silently picks the first of multiple profiles
-    - builds against that same target's BepInEx/Harmony references via BUILD.ps1
-    - copies only ErenshorCraftingExpanded.dll into this mod's own plugin folder
+.DESCRIPTION
+  Convenience wrapper for fast local iteration. Builds via BUILD.ps1, then copies the resulting
+  DLL straight into <GameDir>\plugins\ErenshorCraftingExpanded.dll, overwriting whatever is
+  already there. If you want a reversible test install with an automatic backup/restore session,
+  use INSTALL_TEST.ps1 / REMOVE_TEST.ps1 instead.
 
-  Preferred reversible workflow:
-    .\BUILD.ps1 -BepInExRoot <profile>
-    .\INSTALL_TEST.ps1 -BepInExRoot <profile>
-    .\REMOVE_TEST.ps1 -BepInExRoot <profile>
+.PARAMETER GameDir
+  Erenshor install directory. Auto-detected if omitted.
+
+.PARAMETER LunarisLibDir
+  Folder containing Lunaris.dll/0Harmony.dll for compilation references. Auto-detected if omitted.
 #>
 param(
     [string]$GameDir = "",
-    [string]$BepInExRoot = ""
+    [string]$LunarisLibDir = ""
 )
 
 $ErrorActionPreference = "Stop"
 $ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 
-function Find-Roots([string]$Explicit, [string]$Game) {
-    if ($Explicit) {
-        if (-not (Test-Path (Join-Path $Explicit "BepInEx\core\BepInEx.dll"))) {
-            throw "-BepInExRoot '$Explicit' does not contain BepInEx\\core\\BepInEx.dll."
-        }
-        return ,(Resolve-Path $Explicit).Path
-    }
-    $roots = @()
-    if ($Game -and (Test-Path (Join-Path $Game "BepInEx\core\BepInEx.dll"))) { $roots += (Resolve-Path $Game).Path }
-    $profiles = Join-Path $env:APPDATA "r2modmanPlus-local\Erenshor\profiles"
-    if (Test-Path $profiles) {
-        Get-ChildItem $profiles -Directory | ForEach-Object {
-            if (Test-Path (Join-Path $_.FullName "BepInEx\core\BepInEx.dll")) { $roots += $_.FullName }
-        }
-    }
-    return @($roots | Select-Object -Unique)
-}
+Write-Host "=== Erenshor Crafting Expanded - build and install (no backup) ===" -ForegroundColor Cyan
+Write-Host "This overwrites any existing plugins\ErenshorCraftingExpanded.dll with no backup." -ForegroundColor Yellow
+Write-Host "Use INSTALL_TEST.ps1 instead if you want a reversible, backed-up install." -ForegroundColor Yellow
 
-Write-Host "=== Erenshor Crafting Expanded - one-shot build + install (NO backup) ===" -ForegroundColor Cyan
-$roots = @(Find-Roots $BepInExRoot $GameDir)
-if ($roots.Count -eq 0) { throw "No BepInEx profile found. Pass -BepInExRoot explicitly." }
-if ($roots.Count -gt 1 -and -not $BepInExRoot) {
-    Write-Host "Multiple BepInEx profiles found - refusing to guess. Re-run with -BepInExRoot:" -ForegroundColor Red
-    $roots | ForEach-Object { Write-Host "  $_" }
-    throw "Ambiguous install target."
-}
-$InstallRoot = if ($BepInExRoot) { (Resolve-Path $BepInExRoot).Path } else { $roots[0] }
+& (Join-Path $ScriptRoot "BUILD.ps1") -GameDir $GameDir -LunarisLibDir $LunarisLibDir
+if ($LASTEXITCODE -ne 0) { throw "Build failed; nothing installed." }
 
-$buildArgs = @("-BepInExRoot", $InstallRoot)
-if ($GameDir) { $buildArgs += @("-GameDir", $GameDir) }
-& (Join-Path $ScriptRoot "BUILD.ps1") @buildArgs
-if ($LASTEXITCODE -ne 0) { throw "Build failed; install not attempted." }
+# Re-resolve GameDir the same way BUILD.ps1 did, since BUILD.ps1 runs in its own scope.
+if (-not $GameDir -or -not (Test-Path (Join-Path $GameDir "Erenshor.exe"))) {
+    $candidates = @()
+    if (${env:ProgramFiles(x86)}) { $candidates += Join-Path ${env:ProgramFiles(x86)} "Steam\steamapps\common\Erenshor" }
+    if ($env:ProgramFiles) { $candidates += Join-Path $env:ProgramFiles "Steam\steamapps\common\Erenshor" }
+    foreach ($drive in @("C","D","E","F")) { $candidates += "${drive}:\SteamLibrary\steamapps\common\Erenshor" }
+    $GameDir = $null
+    foreach ($candidate in ($candidates | Select-Object -Unique)) {
+        if (Test-Path (Join-Path $candidate "Erenshor.exe")) { $GameDir = (Resolve-Path $candidate).Path; break }
+    }
+    if (-not $GameDir) { throw "Erenshor installation not found. Pass -GameDir 'C:\path\to\Erenshor'." }
+}
 
 $builtDll = Join-Path $ScriptRoot "bin\ErenshorCraftingExpanded.dll"
-if (-not (Test-Path $builtDll)) { throw "BUILD.ps1 completed but output DLL was not found: $builtDll" }
-$pluginDir = Join-Path $InstallRoot "BepInEx\plugins\ErenshorCraftingExpanded"
-New-Item -ItemType Directory -Force -Path $pluginDir | Out-Null
-$out = Join-Path $pluginDir "ErenshorCraftingExpanded.dll"
-Copy-Item $builtDll $out -Force
+if (-not (Test-Path $builtDll)) { throw "Expected build output not found: $builtDll" }
 
-Write-Host "Installed Erenshor Crafting Expanded to $out" -ForegroundColor Green
-Write-Host "WARNING: this one-shot path did not back up a prior install. Use INSTALL_TEST.ps1 for reversible testing." -ForegroundColor Yellow
+$pluginsDir = Join-Path $GameDir "plugins"
+New-Item -ItemType Directory -Force -Path $pluginsDir | Out-Null
+$installedDll = Join-Path $pluginsDir "ErenshorCraftingExpanded.dll"
+Copy-Item $builtDll $installedDll -Force
+
+Write-Host ""
+Write-Host "INSTALLED (no backup taken)" -ForegroundColor Green
+Write-Host "  $installedDll"
+Write-Host "Restart Erenshor (or use Lunaris's reload if available) to pick up the change."

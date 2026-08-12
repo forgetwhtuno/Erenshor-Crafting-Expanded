@@ -5,10 +5,18 @@ progression, a crafting-commission proof-of-concept, and a new Foraging gatherin
 mod-owned nodes (vanilla Mining and Fishing are untouched). See `docs/` for the full native-API
 research this mod is built against, and the top-level implementation plan for scope boundaries.
 
-## Status: Experimental / development (0.1.1)
+## Status: Experimental / development (0.2.0)
 
+- **Native Lunaris plugin.** This version has been migrated off BepInEx 5 onto native Lunaris
+  (`LunarisPlugin`/`[LunarisPlugin]`/`[LunarisPermission]`, native `Config`/`Logging`). This is a
+  loader/config/logging/lifecycle migration only — no gameplay behavior, recipe logic, Foraging
+  scope, or command syntax changed. The migration has been statically verified (real compile
+  against the installed game + Lunaris assemblies, zero BepInEx references in the compiled
+  output, hot-unload event-cleanup audit, full deterministic test suite) but **has not yet been
+  live-tested in a running game with Lunaris**. A legacy BepInEx release remains available in this
+  repository's Git history/tags for anyone still on BepInEx.
 - **Compiles cleanly and passes its full deterministic test suite** against the actual installed
-  Erenshor/BepInEx assemblies (`BUILD.ps1` / `tests\RUN_TESTS.ps1`, 10/10 pure-logic test groups
+  Erenshor/Lunaris assemblies (`BUILD.ps1` / `tests\RUN_TESTS.ps1`, 10/10 pure-logic test groups
   pass). Every Harmony patch target (`Smithing.Combine`, `Smithing.DoSuccess`,
   `ItemDatabase.Start`, `TypeText.CheckCommands`, `PlayerControl.LeftClick`,
   `csMouseOrbit.LateUpdate`) and the native member assumptions this mod relies on
@@ -16,11 +24,13 @@ research this mod is built against, and the top-level implementation plan for sc
   `Item.TemplateIngredients`/`TemplateRewards`, `ItemIcon.QuickSmith`, `PlayerControl.myTransform`,
   `GameData.PlayerTyping`) have been independently re-verified against the currently installed
   game assembly. This is a static/compile-time verification pass, not a live-game one.
-- **Partially runtime verified.** Wild Herb custom-item registration, native inventory grant,
-  stacking, zone leave/return, a full game exit/restart with the same character, and the
-  `/craftdiag` inventory count have all been confirmed live by the human tester. See
-  `docs/NATIVE_ITEM_REGISTRY_FINDINGS.md` for the evidence matrix. Bank/vendor/trade/Auction
-  House behavior remains unverified and is not claimed safe.
+- **Partially runtime verified — under the prior BepInEx build, not yet under native Lunaris.**
+  Wild Herb custom-item registration, native inventory grant, stacking, zone leave/return, a full
+  game exit/restart with the same character, and the `/craftdiag` inventory count were all
+  confirmed live by the human tester before this migration. See
+  `docs/NATIVE_ITEM_REGISTRY_FINDINGS.md` for that evidence matrix. None of the underlying
+  gameplay code changed in the Lunaris migration, but a fresh live pass under Lunaris is still
+  pending. Bank/vendor/trade/Auction House behavior remains unverified and is not claimed safe.
 - **Smithing stack QoL and the Foraging scanner rewrite still need a live regression pass.** The
   code keeps native `Smithing.Combine()` authoritative, captures the recipe before `DoSuccess()`
   and awards progression only in the postfix after native success, and wires stack QoL to the
@@ -49,23 +59,29 @@ research this mod is built against, and the top-level implementation plan for sc
 
 ## Installation
 
-This is a BepInEx 5 plugin. Requires BepInEx installed and Erenshor already launched modded once
-(so a BepInEx profile exists).
+This is a **native Lunaris plugin** — BepInEx is no longer required for this version. Requires
+Lunaris installed in your Erenshor install. The compiled DLL is placed directly in
+`<Erenshor>\plugins\ErenshorCraftingExpanded.dll`; Lunaris manages enable/disable.
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\BUILD.ps1
 powershell -ExecutionPolicy Bypass -File .\INSTALL_TEST.ps1
 ```
 
-`BUILD.ps1` auto-detects your Erenshor install and BepInEx reference root and compiles to this
-mod's own `bin\`; it never installs anything. `INSTALL_TEST.ps1` performs the actual install and
-records a target-bound, timestamped backup so `REMOVE_TEST.ps1` can cleanly restore whatever was
-there before. `BUILD_AND_INSTALL.ps1` is a one-shot alternative with no backup — prefer the
+`BUILD.ps1` auto-detects your Erenshor install and a Lunaris developer reference folder
+(`Lunaris.dll`/`0Harmony.dll`) and compiles to this mod's own `bin\`; it never installs anything.
+`INSTALL_TEST.ps1` performs the actual install into `<Erenshor>\plugins\` and records a
+target-bound, timestamped backup so `REMOVE_TEST.ps1` can cleanly restore whatever was there
+before. `BUILD_AND_INSTALL.ps1` is a one-shot alternative with no backup — prefer the
 test/remove pair above during development.
+
+A legacy BepInEx build of this mod remains available in this repository's Git history for anyone
+who hasn't moved to Lunaris yet.
 
 ## Configuration
 
-Settings live in the generated BepInEx config file after first launch.
+Settings are managed by Lunaris's native config system (typed `[Config]` fields, no separate
+`.cfg` file to hand-edit).
 
 | Section | Key | Default | What it does |
 |---|---|---|---|
@@ -91,7 +107,7 @@ Settings live in the generated BepInEx config file after first launch.
 
 ## Compatibility
 
-- **Required:** BepInEx 5, a matching installed Erenshor build (the mod compiles against and
+- **Required:** native Lunaris, a matching installed Erenshor build (the mod compiles against and
   disassembles the currently installed `Assembly-CSharp.dll` — see `docs/` for the exact findings).
 - **Optional integration:** none currently. Adapts UI/input-protection *code patterns* from this
   author's own `Erenshor-PvP` (see Acknowledgements) but has no runtime dependency on it or any
@@ -107,10 +123,9 @@ progression is profile-wide, not per-character; crafting commissions are an off-
 
 ## Troubleshooting
 
-- If the mod doesn't load: verify BepInEx itself loads, verify `ErenshorCraftingExpanded.dll` is
-  under the active profile's `BepInEx\plugins\`, and check the BepInEx console/log for a Harmony
-  patch-target error — a missing target fails closed with a log line rather than silently running
-  partial features.
+- If the mod doesn't load: verify Lunaris itself loads, verify `ErenshorCraftingExpanded.dll` is
+  under `<Erenshor>\plugins\`, and check the Lunaris log for a Harmony patch-target error — a
+  missing target fails closed with a log line rather than silently running partial features.
 - Rebuild against the current `Assembly-CSharp.dll` after any Erenshor update; native method/field
   shapes are re-verified each pass but can change with a patch.
 - Run `/craftdiag` for a quick state summary, including any progression `persistenceError`.

@@ -3,26 +3,24 @@
   Build-only script for Erenshor Crafting Expanded. Never installs anything.
 
 .DESCRIPTION
-  Locates the installed Erenshor assemblies and the BepInEx core (for BepInEx.dll/0Harmony.dll
-  reference purposes only - nothing under BepInEx is written to), compiles the mod, and places
-  the output DLL under this mod's own bin\ folder. Stops on the first compiler error. Never
-  touches any BepInEx plugins/config directory - use INSTALL_TEST.ps1 for that, separately and
-  explicitly.
+  Locates the installed Erenshor assemblies and the Lunaris developer reference (for
+  Lunaris.dll/0Harmony.dll reference purposes only), compiles the mod, and places the output DLL
+  under this mod's own bin\ folder. Stops on the first compiler error. Never touches
+  <Erenshor>\plugins - use INSTALL_TEST.ps1 for that, separately and explicitly.
 
 .PARAMETER GameDir
-  Erenshor install directory. Auto-detected under Program Files if omitted.
+  Erenshor install directory. Auto-detected under Program Files/Steam libraries if omitted.
 
-.PARAMETER BepInExRoot
-  A BepInEx root (contains BepInEx\core\BepInEx.dll) used only to source reference DLLs for
-  compilation. Auto-detected via r2modman profiles if omitted. Nothing under this path is
-  modified.
+.PARAMETER LunarisLibDir
+  A folder containing Lunaris.dll and 0Harmony.dll, used only to source reference DLLs for
+  compilation. Defaults to '.\LunarisLibs'. Nothing under this path is modified.
 
 .OUTPUTS
   Prints the exact output DLL path and the exact Erenshor assembly path used.
 #>
 param(
     [string]$GameDir = "",
-    [string]$BepInExRoot = ""
+    [string]$LunarisLibDir = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -42,17 +40,18 @@ function Find-Game([string]$Explicit) {
     throw "Erenshor installation not found. Pass -GameDir 'C:\path\to\Erenshor'."
 }
 
-function Find-Roots([string]$Explicit, [string]$Game) {
-    if ($Explicit -and (Test-Path (Join-Path $Explicit "BepInEx\core\BepInEx.dll"))) { return ,(Resolve-Path $Explicit).Path }
-    $roots = @()
-    if (Test-Path (Join-Path $Game "BepInEx\core\BepInEx.dll")) { $roots += (Resolve-Path $Game).Path }
-    $profiles = Join-Path $env:APPDATA "r2modmanPlus-local\Erenshor\profiles"
-    if (Test-Path $profiles) {
-        Get-ChildItem $profiles -Directory | ForEach-Object {
-            if (Test-Path (Join-Path $_.FullName "BepInEx\core\BepInEx.dll")) { $roots += $_.FullName }
+function Find-LunarisLibDir([string]$Explicit, [string]$Game) {
+    $candidates = @()
+    if ($Explicit) { $candidates += $Explicit }
+    $candidates += (Join-Path $ScriptRoot "LunarisLibs")
+    $candidates += $Game
+    foreach ($candidate in ($candidates | Select-Object -Unique)) {
+        if (-not $candidate) { continue }
+        if ((Test-Path (Join-Path $candidate "Lunaris.dll")) -and (Test-Path (Join-Path $candidate "0Harmony.dll"))) {
+            return (Resolve-Path $candidate).Path
         }
     }
-    return @($roots | Select-Object -Unique)
+    throw "Could not find Lunaris developer references. Put Lunaris.dll and 0Harmony.dll in '$ScriptRoot\LunarisLibs' or pass -LunarisLibDir."
 }
 
 function Find-Csc {
@@ -67,25 +66,16 @@ function Find-Csc {
 Write-Host "=== Erenshor Crafting Expanded - build only, no install ===" -ForegroundColor Cyan
 
 $GameDir = Find-Game $GameDir
-$roots = @(Find-Roots $BepInExRoot $GameDir)
-if ($roots.Count -eq 0) { throw "No BepInEx installation found (checked the game dir and r2modman profiles). Pass -BepInExRoot explicitly." }
-if ($roots.Count -gt 1 -and -not $BepInExRoot) {
-    Write-Host "Multiple BepInEx installations found - refusing to choose reference assemblies implicitly. Re-run with -BepInExRoot:" -ForegroundColor Red
-    $roots | ForEach-Object { Write-Host "  candidate: $_" }
-    throw "Ambiguous BepInEx reference root."
-}
-$ReferenceRoot = if ($BepInExRoot) { (Resolve-Path $BepInExRoot).Path } else { $roots[0] }
-
+$LunarisLibDir = Find-LunarisLibDir $LunarisLibDir $GameDir
 $csc = Find-Csc
 $managed = Join-Path $GameDir "Erenshor_Data\Managed"
-$core = Join-Path $ReferenceRoot "BepInEx\core"
 $outDir = Join-Path $ScriptRoot "bin"
 New-Item -ItemType Directory -Force -Path $outDir | Out-Null
 $out = Join-Path $outDir "ErenshorCraftingExpanded.dll"
 
 $refs = @(
-    (Join-Path $core "BepInEx.dll"),
-    (Join-Path $core "0Harmony.dll"),
+    (Join-Path $LunarisLibDir "Lunaris.dll"),
+    (Join-Path $LunarisLibDir "0Harmony.dll"),
     (Join-Path $managed "Assembly-CSharp.dll"),
     (Join-Path $managed "netstandard.dll"),
     (Join-Path $managed "UnityEngine.dll"),
@@ -113,7 +103,7 @@ $sourceFiles | ForEach-Object { $lines += ('"' + $_.FullName + '"') }
 $lines | Set-Content $rsp -Encoding ASCII
 
 Write-Host "Erenshor assemblies: $managed"
-Write-Host "BepInEx/Harmony refs: $core"
+Write-Host "Lunaris refs:        $LunarisLibDir"
 Write-Host "Compiling $($sourceFiles.Count) source file(s)..."
 
 & $csc "@$rsp"
