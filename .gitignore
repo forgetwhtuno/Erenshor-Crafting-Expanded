@@ -1,0 +1,18 @@
+# Build output.
+bin/
+obj/
+
+# Local reference assemblies copied from the installed game and BepInEx profile.
+# These are not redistributable; BUILD.ps1 resolves them at build time.
+refs/
+
+# Test-install backups (may contain a copy of a previously installed build).
+test-backups/
+
+*.user
+*.suo
+*.pdb
+*.log
+.vs/
+.idea/
+.vscode/
