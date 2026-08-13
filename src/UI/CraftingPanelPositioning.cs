@@ -86,6 +86,15 @@ namespace ErenshorCraftingExpanded
 
             CraftingPanelPosition garbage = Resolve(1920f, 1080f, 300f, 260f, float.NaN, float.PositiveInfinity);
             if (!NearlyEqual(garbage.X, LeftMargin)) return "FAIL non-finite offset recovery";
+
+            int persists = 0;
+            CraftingPanelPositionState state = new CraftingPanelPositionState(0f, 0f, delegate(float x, float y) { persists++; });
+            state.ResolveInitialAndRecover(1920f, 1080f, 300f, 260f);
+            CraftingPanelPosition runtimeMove = Clamp(1920f, 1080f, 300f, 260f, 500f, 400f);
+            state.NoteRuntimePosition(runtimeMove);
+            if (!state.Dirty || persists != 0) return "FAIL runtime move deferred persistence";
+            state.CommitIfMoved();
+            if (persists != 1) return "FAIL runtime move commit";
             return "PASS crafting panel positioning";
         }
     }
@@ -104,7 +113,9 @@ namespace ErenshorCraftingExpanded
             _persist = persist;
         }
 
-        internal CraftingPanelPosition ResolveAndRecover(float screenWidth, float screenHeight, float panelWidth, float panelHeight)
+        internal bool Dirty { get { return _dirty; } }
+
+        internal CraftingPanelPosition ResolveInitialAndRecover(float screenWidth, float screenHeight, float panelWidth, float panelHeight)
         {
             CraftingPanelPosition position = CraftingPanelPositioning.Resolve(screenWidth, screenHeight, panelWidth, panelHeight, _offsetX, _offsetY);
             CraftingPanelOffsets normalized = CraftingPanelPositioning.ToOffsets(position);
@@ -112,12 +123,17 @@ namespace ErenshorCraftingExpanded
             return position;
         }
 
-        internal CraftingPanelPosition MoveTo(float screenWidth, float screenHeight, float panelWidth, float panelHeight, float desiredX, float desiredY)
+        internal void NoteRuntimePosition(CraftingPanelPosition position)
         {
-            CraftingPanelPosition position = CraftingPanelPositioning.Clamp(screenWidth, screenHeight, panelWidth, panelHeight, desiredX, desiredY);
             CraftingPanelOffsets offsets = CraftingPanelPositioning.ToOffsets(position);
             if (SetOffsets(offsets.X, offsets.Y)) _dirty = true;
-            return position;
+        }
+
+        internal void Reset()
+        {
+            SetOffsets(0f, 0f);
+            _dirty = false;
+            Persist();
         }
 
         internal void CommitIfMoved()
@@ -140,4 +156,5 @@ namespace ErenshorCraftingExpanded
             if (_persist != null) _persist(_offsetX, _offsetY);
         }
     }
+
 }

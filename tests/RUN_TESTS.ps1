@@ -25,6 +25,7 @@ $out = Join-Path $env:TEMP "ErenshorCraftingExpanded.Tests.exe"
     (Join-Path $ScriptRoot "..\src\Commissions\CommissionPolicy.cs") `
     (Join-Path $ScriptRoot "..\src\UI\CraftingPanelPositioning.cs") `
     (Join-Path $ScriptRoot "..\src\UI\CraftingUiState.cs") `
+    (Join-Path $ScriptRoot "..\src\SuiteUiPolicies.cs") `
     (Join-Path $ScriptRoot "..\src\Foraging\ForageNodeDefinition.cs") `
     (Join-Path $ScriptRoot "..\src\Foraging\ForageNodeCatalog.cs") `
     (Join-Path $ScriptRoot "..\src\Foraging\ForageNodeState.cs") `

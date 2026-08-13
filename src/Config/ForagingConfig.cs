@@ -2,10 +2,6 @@ using UnityEngine;
 
 namespace ErenshorCraftingExpanded
 {
-    // Separate from CraftingConfig since Foraging is its own subsystem with its own findings
-    // doc and its own unresolved manual-verification items (see
-    // docs/NATIVE_MINING_AND_FORAGING_FINDINGS.md). No Foraging XP/level settings exist here by
-    // design - the user's spec explicitly excludes gathering progression in this pass.
     internal static class ForagingConfig
     {
         internal static CraftingExpandedConfigEntry<bool> EnableForaging;
@@ -16,9 +12,6 @@ namespace ErenshorCraftingExpanded
         internal static CraftingExpandedConfigEntry<float> DebugRespawnSecondsOverride;
         internal static CraftingExpandedConfigEntry<bool> AllowDebugPlaceholderVisual;
 
-        // Development-only label used by the intentionally unauthored candidate definition. It is
-        // not itself trusted as placeholder detection; ForageNodeCatalog validation rejects the
-        // unset position/missing visual source before this definition can ever register.
         internal const string UnsurveyedLabel = "UNVERIFIED_PENDING_MANUAL_SURVEY";
 
         internal static void Initialize(CraftingExpandedSettings settings)

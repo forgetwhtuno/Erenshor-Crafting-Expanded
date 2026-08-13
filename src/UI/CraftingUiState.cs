@@ -37,6 +37,23 @@ namespace ErenshorCraftingExpanded
                 Current = CraftingUiState.Open;
         }
 
+        internal static void Open()
+        {
+            if (Current != CraftingUiState.PinnedOpen) Current = CraftingUiState.Open;
+        }
+
+        // Hub/standalone-launcher access must remain usable outside a forge context. Opening from
+        // those recovery/control surfaces therefore pins until the player explicitly unpins/closes.
+        internal static void OpenPersistent()
+        {
+            Current = CraftingUiState.PinnedOpen;
+        }
+
+        internal static void Close()
+        {
+            Current = CraftingUiState.Available;
+        }
+
         internal static void SetPinned(bool pinned)
         {
             if (pinned && Current == CraftingUiState.Open) Current = CraftingUiState.PinnedOpen;
@@ -75,6 +92,10 @@ namespace ErenshorCraftingExpanded
             OnContextRelevant(false);
             if (Current != CraftingUiState.Hidden) return "FAIL unpinned panel should then hide without context";
 
+            Current = CraftingUiState.Hidden;
+            OpenPersistent();
+            if (Current != CraftingUiState.PinnedOpen) return "FAIL control open should be persistent";
+            Close();
             Current = CraftingUiState.Hidden;
             return "PASS crafting ui state";
         }

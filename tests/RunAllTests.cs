@@ -12,6 +12,7 @@ internal static class RunAllTests
             CommissionPolicy.RunSelfTests(),
             CraftingPanelPositioning.RunSelfTests(),
             CraftingUiStateMachine.RunSelfTests(),
+            SuiteUiPositionPolicy.RunSelfTests(),
             ForageNodeRuntimeState.RunSelfTests(),
             ForageNodeCatalog.RunSelfTests(),
             ForagingRuntimeConfigValidation.RunSelfTests(),

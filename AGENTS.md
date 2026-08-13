@@ -29,10 +29,11 @@ A horizontal-progression expansion to Erenshor's native crafting (native Lunaris
 
 ## Important source files
 
-- `src/ErenshorCraftingExpandedPlugin.cs` — `LunarisPlugin` entry point, `/craftdiag` command patch, UI input-protection patches (`PlayerControl.LeftClick`, `csMouseOrbit.LateUpdate`, adapted from this author's own `Erenshor-PvP`, see `docs/ATTRIBUTION.md`).
+- `src/ErenshorCraftingExpandedPlugin.cs` — `LunarisPlugin` entry point, `/craftdiag` command patch, patch-set fail-closed handling, and retained-UI lifecycle. The old UI-only `PlayerControl.LeftClick` / `csMouseOrbit.LateUpdate` prefixes are no longer part of the current panel architecture.
 - `src/Crafting/CraftSuccessPatch.cs`, `src/Crafting/ForgeStackQolPatch.cs` — the two Smithing Harmony patches; see the design boundary above before touching either.
 - `src/Crafting/CraftingProgressionStore.cs` — sidecar persistence, exposes `LastError`; never touches Erenshor's own save files.
 - `src/Compatibility/GameCraftingApi.cs`, `GameForagingApi.cs`, `GameItemRegistryApi.cs`, `SimIdentityApi.cs` — the reflection/IL-evidence boundary against native game types.
+- `src/UI/`, `src/RetainedUiKit.cs` — retained uGUI panel/launcher and Suite-style drag/position behavior; gameplay state still routes through `CraftingController`.
 - `src/Foraging/` — node catalog/controller/definitions and `ForagingScanPolicy.cs` (pure, testable candidate-ranking logic used by the live scanner).
 - `src/Items/CustomItemRegistry.cs` — transactional custom item insertion.
 - `src/Commissions/` — experimental, disabled-by-default PoC; do not enable by default.
@@ -40,7 +41,7 @@ A horizontal-progression expansion to Erenshor's native crafting (native Lunaris
 ## Build / test procedure
 
 - Build-only compile check: `powershell -ExecutionPolicy Bypass -File .\BUILD.ps1` — auto-detects the Erenshor install and a Lunaris developer reference folder (`Lunaris.dll`/`0Harmony.dll`), compiles to this mod's own `bin\`, and **never installs anything**. Pass `-GameDir`/`-LunarisLibDir` explicitly if auto-detection can't find them.
-- Deterministic pure-logic tests: `powershell -ExecutionPolicy Bypass -File .\tests\RUN_TESTS.ps1` — standalone `csc` compile + run of the 10 pure-logic test groups, no game/BepInEx dependency.
+- Deterministic pure-logic tests: `powershell -ExecutionPolicy Bypass -File .\tests\RUN_TESTS.ps1` — standalone `csc` compile + run of the 11 pure-logic test groups, no game/BepInEx dependency.
 - Test install (reversible, records a backup): `.\INSTALL_TEST.ps1`. Removal: `.\REMOVE_TEST.ps1`. `BUILD_AND_INSTALL.ps1` is a one-shot path with no backup — not the preferred development flow.
 - The shipped build compiles with the legacy .NET Framework `csc.exe` (effectively **C# 5**) despite the `.csproj` claiming `LangVersion 7.3`. Avoid string interpolation, `nameof`, null-conditional operators, auto-property initializers, expression-bodied members, and inline `out` variables — this toolchain rejects all of them.
 - Compile and run the deterministic tests before claiming a change works. Live in-game verification (see `docs/FIRST_RUNTIME_TEST.md`) is a separate step this environment cannot perform — never claim something is runtime-verified unless it actually was, by a human, in the running game.
