@@ -19,10 +19,10 @@ namespace ErenshorCraftingExpanded
         private static string _savePath;
         private static bool _initialized;
 
-        internal static void Initialize(BepInEx.Configuration.ConfigFile config, string pluginDataDir)
+        internal static void Initialize(CraftingExpandedSettings settings, string pluginDataDir)
         {
-            CraftingConfig.Initialize(config);
-            ForagingConfig.Initialize(config);
+            CraftingConfig.Initialize(settings);
+            ForagingConfig.Initialize(settings);
             _savePath = Path.Combine(pluginDataDir, "smithing-progress.json");
             CraftingSaveData data = CraftingProgressionStore.Load(_savePath);
             Progress = data.Smithing ?? new CraftingProgress();

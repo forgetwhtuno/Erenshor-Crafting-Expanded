@@ -34,13 +34,13 @@ Keep `EnablePoCNode=false` until a real plant source/location has been authored.
 ## A. Build / install / boot
 
 ```powershell
-.\BUILD.ps1 -BepInExRoot <exact profile root>
-.\INSTALL_TEST.ps1 -BepInExRoot <same exact profile root>
+.\BUILD.ps1 -GameDir <exact Erenshor install root>
+.\INSTALL_TEST.ps1 -GameDir <same exact Erenshor install root>
 ```
 
 1. Start Erenshor manually.
 2. Reach normal gameplay.
-3. Check `BepInEx/LogOutput.log` for plugin/Harmony errors.
+3. Check the Lunaris log for plugin/Harmony errors.
 4. Run `/craftdiag` and save the output.
 
 STOP on `Collision`, `Unavailable`, failed Harmony patching, or startup exceptions.
@@ -218,11 +218,11 @@ Once a verified plant source and coordinate are authored:
 ## K. Reversible removal
 
 ```powershell
-.\REMOVE_TEST.ps1 -BepInExRoot <same exact profile root>
+.\REMOVE_TEST.ps1 -GameDir <same exact Erenshor install root>
 ```
 
-The revised install/remove scripts bind backup sessions to their exact target profile and mark a
-session restored after use. Confirm unrelated plugin/config files are untouched.
+The install/remove scripts bind backup sessions to their exact target Erenshor install and mark a
+session restored after use. Confirm unrelated plugin files are untouched.
 
 ---
 

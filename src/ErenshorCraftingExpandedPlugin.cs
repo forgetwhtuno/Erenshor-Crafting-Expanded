@@ -1,61 +1,66 @@
 using System;
 using System.Linq;
-using BepInEx;
+using Lunaris;
+using Lunaris.Config;
 using HarmonyLib;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
 namespace ErenshorCraftingExpanded
 {
-    [BepInPlugin("forgetwhtuno.erenshor.craftingexpanded", "Erenshor Crafting Expanded", "0.1.1")]
-    [BepInProcess("Erenshor.exe")]
-    public sealed class ErenshorCraftingExpandedPlugin : BaseUnityPlugin
+    [LunarisPlugin("forgetwhtuno.erenshor.craftingexpanded", "0.2.0", "forgetwhtuno",
+        "Horizontal-progression expansion to Erenshor's native crafting: forge quality-of-life, Smithing progression, an experimental commission PoC, and a mod-owned Foraging system.")]
+    [LunarisPermission(LunarisPermission.FileAccess | LunarisPermission.Reflection | LunarisPermission.Harmony)]
+    public sealed class ErenshorCraftingExpandedPlugin : LunarisPlugin
     {
-        internal const string Version = "0.1.1";
+        internal const string Version = "0.2.0";
         private Harmony _harmony;
+        private CraftingExpandedSettings _settings;
         private bool _loggedStartupSummary;
         private bool _runtimeReady;
 
         private void Awake()
         {
             ErenshorCraftingExpandedPluginHolder.Instance = this;
-            string dataDir = System.IO.Path.Combine(Paths.ConfigPath, "ErenshorCraftingExpanded");
-            CraftingController.Initialize(Config, dataDir);
+            _settings = new CraftingExpandedSettings();
+            Config.Register(ref _settings);
+            string dataDir = System.IO.Path.Combine(System.IO.Path.Combine(AppContext.BaseDirectory, "plugins", "config"), "ErenshorCraftingExpanded");
+            CraftingController.Initialize(_settings, dataDir);
             _harmony = new Harmony("forgetwhtuno.erenshor.craftingexpanded");
 
             // A single missing Harmony patch target (e.g. a renamed native method after a game
             // update) would otherwise throw here and silently prevent the whole plugin from
-            // loading, with no clue why - log the exact failure instead of letting BepInEx's
-            // generic loader error be the only trace.
+            // loading, with no clue why - log the exact failure instead of letting the generic
+            // loader error be the only trace.
             try
             {
                 _harmony.PatchAll();
                 _runtimeReady = true;
-                Logger.LogInfo("Erenshor Crafting Expanded " + Version + ": Harmony patches applied OK (" + _harmony.GetPatchedMethods().Count() + " methods patched).");
+                Logging.LogInfo("Erenshor Crafting Expanded " + Version + ": Harmony patches applied OK (" + _harmony.GetPatchedMethods().Count() + " methods patched).");
             }
             catch (Exception ex)
             {
-                Logger.LogError("Erenshor Crafting Expanded " + Version + ": Harmony PatchAll FAILED - " + ex);
+                Logging.LogError("Erenshor Crafting Expanded " + Version + ": Harmony PatchAll FAILED - " + ex);
                 // PatchAll can fail after applying an earlier patch. Avoid leaving a partially
                 // patched feature set running under the false assumption that every hook exists.
                 try { _harmony.UnpatchSelf(); } catch { }
                 _runtimeReady = false;
-                Logger.LogError("Erenshor Crafting Expanded is fail-closed for this session because its verified patch set was incomplete.");
+                Logging.LogError("Erenshor Crafting Expanded is fail-closed for this session because its verified patch set was incomplete.");
             }
 
             SceneManager.sceneLoaded += OnSceneLoaded;
             SceneManager.sceneUnloaded += OnSceneUnloaded;
-            Logger.LogInfo("Erenshor Crafting Expanded " + Version + " loaded.");
+            Logging.LogInfo("Erenshor Crafting Expanded " + Version + " loaded.");
         }
 
         private void Update()
         {
             if (!_runtimeReady) return;
-            try { CraftingController.Tick(); } catch (Exception ex) { Logger.LogError("Crafting update failed: " + ex); }
+            try { CraftingController.Tick(); } catch (Exception ex) { Logging.LogError("Crafting update failed: " + ex); }
             if (!_loggedStartupSummary && CraftingExpandedItems.AttemptedThisSession)
             {
                 _loggedStartupSummary = true;
-                try { LogStartupSummary(); } catch (Exception ex) { Logger.LogError("Crafting startup summary failed: " + ex); }
+                try { LogStartupSummary(); } catch (Exception ex) { Logging.LogError("Crafting startup summary failed: " + ex); }
             }
         }
 
@@ -64,18 +69,18 @@ namespace ErenshorCraftingExpanded
         // spamming LogOutput.log on every frame.
         private void LogStartupSummary()
         {
-            Logger.LogInfo("Erenshor Crafting Expanded " + Version + " startup summary:");
-            Logger.LogInfo("  Foraging enabled=" + ForagingConfig.EnableForaging.Value + " pocNodeEnabled=" + ForagingConfig.EnablePoCNode.Value);
-            Logger.LogInfo("  Wild Herb id=" + CraftingExpandedItemIds.WildHerbId +
+            Logging.LogInfo("Erenshor Crafting Expanded " + Version + " startup summary:");
+            Logging.LogInfo("  Foraging enabled=" + ForagingConfig.EnableForaging.Value + " pocNodeEnabled=" + ForagingConfig.EnablePoCNode.Value);
+            Logging.LogInfo("  Wild Herb id=" + CraftingExpandedItemIds.WildHerbId +
                 " state=" + CraftingExpandedItems.WildHerbState() +
                 " baseItem=" + (string.IsNullOrEmpty(GameItemRegistryApi.LastBaseItemName) ? "(none found)" : GameItemRegistryApi.LastBaseItemName) +
                 " baseItemId=" + (string.IsNullOrEmpty(GameItemRegistryApi.LastBaseItemId) ? "(unknown)" : GameItemRegistryApi.LastBaseItemId));
             string conflict = CraftingExpandedItems.ConflictingItemName();
             string failure = CraftingExpandedItems.LastFailureReason();
-            if (!string.IsNullOrEmpty(conflict)) Logger.LogWarning("  Wild Herb id collision with existing item: " + conflict);
-            if (!string.IsNullOrEmpty(failure)) Logger.LogWarning("  Wild Herb registration issue: " + failure);
+            if (!string.IsNullOrEmpty(conflict)) Logging.LogWarning("  Wild Herb id collision with existing item: " + conflict);
+            if (!string.IsNullOrEmpty(failure)) Logging.LogWarning("  Wild Herb registration issue: " + failure);
         }
-        private void OnGUI() { if (!_runtimeReady) return; try { CraftingController.Draw(); } catch (Exception ex) { Logger.LogError("Crafting UI failed: " + ex); } }
+        private void OnGUI() { if (!_runtimeReady) return; try { CraftingController.Draw(); } catch (Exception ex) { Logging.LogError("Crafting UI failed: " + ex); } }
         private void OnSceneLoaded(Scene scene, LoadSceneMode mode) { CraftingController.SceneTransition(); }
         private void OnSceneUnloaded(Scene scene) { CraftingController.SceneTransition(); }
 
@@ -86,10 +91,11 @@ namespace ErenshorCraftingExpanded
             ErenshorCraftingExpandedPluginHolder.Instance = null;
             try { SceneManager.sceneLoaded -= OnSceneLoaded; SceneManager.sceneUnloaded -= OnSceneUnloaded; } catch { }
             try { if (_harmony != null) _harmony.UnpatchSelf(); } catch { }
+            _harmony = null;
         }
 
-        internal void LogErrorPublic(string message) { Logger.LogError(message); }
-        internal void LogInfoPublic(string message) { Logger.LogInfo(message); }
+        internal void LogErrorPublic(string message) { Logging.LogError(message); }
+        internal void LogInfoPublic(string message) { Logging.LogInfo(message); }
 
         internal bool HandleCommand(TypeText typeText, string raw)
         {

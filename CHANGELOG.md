@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.2.0 - Native Lunaris migration
+
+- Migrated off BepInEx 5 onto native Lunaris: `LunarisPlugin`/`[LunarisPlugin]`/
+  `[LunarisPermission(FileAccess | Reflection | Harmony)]` replace `BaseUnityPlugin`/
+  `[BepInPlugin]`; `ManualLogSource` replaced by native `Logging`; `Config.Bind`/`ConfigEntry<T>`
+  replaced by a typed `CraftingExpandedSettings` class (`[Config]` fields) plus a small
+  `CraftingExpandedConfigEntry<T>` compatibility shim so existing `.Value` call sites needed no
+  changes. All 14 existing settings (7 Crafting, 7 Foraging) preserved with identical
+  section/key/default/description.
+- This is a loader/config/logging/lifecycle migration only: no recipe logic, Foraging scope,
+  Harmony patch targets, `/craftdiag` command syntax, or config defaults changed. Every Harmony
+  patch target was re-verified against the currently installed `Assembly-CSharp.dll`.
+- `BUILD.ps1`, `BUILD_AND_INSTALL.ps1`, `INSTALL_TEST.ps1`, and `REMOVE_TEST.ps1` rewritten for
+  Lunaris: install target is now `<Erenshor>\plugins\ErenshorCraftingExpanded.dll` (a single file,
+  no per-mod subfolder or separate `.cfg` file to back up); reference resolution now looks for a
+  Lunaris developer folder (`Lunaris.dll`/`0Harmony.dll`) instead of a BepInEx profile root; all
+  r2modman/BepInEx-profile auto-detection removed. `INSTALL_TEST.ps1`/`REMOVE_TEST.ps1` keep the
+  same target-bound, timestamped backup/restore session semantics as before.
+- Verified: real compile against the installed Erenshor + Lunaris assemblies, zero `BepInEx`
+  references in the compiled output, full existing deterministic test suite still passes
+  (10/10 pure-logic groups), and a static hot-unload audit (every `SceneManager.sceneLoaded`/
+  `sceneUnloaded` subscription has a matching unsubscribe in `OnDestroy`; the only
+  `AppDomain.CurrentDomain.GetAssemblies()` usages are fresh per-call scans with no
+  `AssemblyLoad` event subscription to leak).
+- Not yet done: live in-game verification under Lunaris. The mod has not been loaded, unloaded, or
+  exercised in a running game since this migration.
+
 ## 0.1.1 - Source review pass
 
 - Foraging scanner rewritten to exclude the local player hierarchy, other actor-owned renderers

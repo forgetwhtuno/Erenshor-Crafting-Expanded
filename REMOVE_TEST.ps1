@@ -1,117 +1,91 @@
 <#
 .SYNOPSIS
-  Removes a Crafting Expanded test install and restores the latest UNRESTORED backup session for
-  the same BepInEx target, if that session contained a prior install.
+  Undoes an INSTALL_TEST.ps1 session for Erenshor Crafting Expanded.
 
 .DESCRIPTION
-  Deletes ONLY <BepInExRoot>\BepInEx\plugins\ErenshorCraftingExpanded and this mod's config file.
-  Backup sessions are target-bound by target-root.txt. A session is marked restored after use so
-  running REMOVE_TEST.ps1 twice cannot repeatedly resurrect an older Crafting Expanded build.
-  Never touches any other plugin/config file.
+  Removes <GameDir>\plugins\ErenshorCraftingExpanded.dll, then finds the most recent
+  UNRESTORED backup session (under test-backups\) whose target-root.txt matches this exact
+  GameDir, and restores its prior state: if that session had a prior install, the backed-up DLL
+  is copied back; if it had none, the target is simply left removed. The session is then marked
+  restored.txt so it cannot be replayed a second time.
+
+.PARAMETER GameDir
+  Erenshor install directory. Auto-detected if omitted.
 #>
 param(
-    [string]$BepInExRoot = ""
+    [string]$GameDir = ""
 )
 
 $ErrorActionPreference = "Stop"
 $ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$PluginFolderName = "ErenshorCraftingExpanded"
-$ConfigFileName = "forgetwhtuno.erenshor.craftingexpanded.cfg"
 
-function Find-Roots([string]$Explicit) {
-    if ($Explicit) {
-        if (-not (Test-Path (Join-Path $Explicit "BepInEx"))) {
-            throw "-BepInExRoot '$Explicit' does not contain a BepInEx folder."
-        }
-        return ,(Resolve-Path $Explicit).Path
+function Find-Game([string]$Explicit) {
+    if ($Explicit -and (Test-Path (Join-Path $Explicit "Erenshor.exe"))) { return (Resolve-Path $Explicit).Path }
+    $candidates = @()
+    if (${env:ProgramFiles(x86)}) { $candidates += Join-Path ${env:ProgramFiles(x86)} "Steam\steamapps\common\Erenshor" }
+    if ($env:ProgramFiles) { $candidates += Join-Path $env:ProgramFiles "Steam\steamapps\common\Erenshor" }
+    foreach ($drive in @("C","D","E","F")) { $candidates += "${drive}:\SteamLibrary\steamapps\common\Erenshor" }
+    foreach ($candidate in ($candidates | Select-Object -Unique)) {
+        if (Test-Path (Join-Path $candidate "Erenshor.exe")) { return (Resolve-Path $candidate).Path }
     }
-    $roots = @()
-    $profiles = Join-Path $env:APPDATA "r2modmanPlus-local\Erenshor\profiles"
-    if (Test-Path $profiles) {
-        Get-ChildItem $profiles -Directory | ForEach-Object {
-            if (Test-Path (Join-Path $_.FullName "BepInEx\core\BepInEx.dll")) { $roots += $_.FullName }
-        }
-    }
-    return @($roots | Select-Object -Unique)
+    throw "Erenshor installation not found. Pass -GameDir 'C:\path\to\Erenshor'."
 }
 
-function Find-LatestMatchingBackup([string]$BackupsRoot, [string]$TargetRoot) {
-    if (-not (Test-Path $BackupsRoot)) { return $null }
-    foreach ($candidate in (Get-ChildItem $BackupsRoot -Directory | Sort-Object Name -Descending)) {
-        if (Test-Path (Join-Path $candidate.FullName "restored.txt")) { continue }
-        $targetFile = Join-Path $candidate.FullName "target-root.txt"
-        if (-not (Test-Path $targetFile)) { continue } # old pre-metadata backups are never guessed
-        $recorded = (Get-Content $targetFile -Raw).Trim()
-        if ($recorded -eq $TargetRoot) { return $candidate }
-    }
-    return $null
-}
+Write-Host "=== Erenshor Crafting Expanded - remove TEST install ===" -ForegroundColor Cyan
 
-Write-Host "=== Erenshor Crafting Expanded - REMOVE test install ===" -ForegroundColor Cyan
+$GameDir = Find-Game $GameDir
+Write-Host "Target Erenshor install: $GameDir"
 
-$roots = @(Find-Roots $BepInExRoot)
-if ($roots.Count -eq 0) { throw "No BepInEx profile found. Pass -BepInExRoot explicitly." }
-if ($roots.Count -gt 1 -and -not $BepInExRoot) {
-    Write-Host "Multiple BepInEx profiles found - refusing to guess. Re-run with -BepInExRoot pointing at exactly one:" -ForegroundColor Red
-    $roots | ForEach-Object { Write-Host "  $_" }
-    throw "Ambiguous target."
-}
-$TargetRoot = if ($BepInExRoot) { (Resolve-Path $BepInExRoot).Path } else { $roots[0] }
-$targetPluginDir = Join-Path $TargetRoot "BepInEx\plugins\$PluginFolderName"
-$targetConfigFile = Join-Path $TargetRoot "BepInEx\config\$ConfigFileName"
-
-Write-Host "Target: $TargetRoot"
-
-$removed = @()
-if (Test-Path $targetPluginDir) { Remove-Item $targetPluginDir -Recurse -Force; $removed += $targetPluginDir }
-if (Test-Path $targetConfigFile) { Remove-Item $targetConfigFile -Force; $removed += $targetConfigFile }
-if ($removed.Count -gt 0) {
-    Write-Host "Removed:" -ForegroundColor Yellow
-    $removed | ForEach-Object { Write-Host "  $_" }
+$installedDll = Join-Path (Join-Path $GameDir "plugins") "ErenshorCraftingExpanded.dll"
+if (Test-Path $installedDll) {
+    Remove-Item $installedDll -Force
+    Write-Host "Removed: $installedDll"
 } else {
-    Write-Host "No current Crafting Expanded files were installed at this target."
+    Write-Host "Nothing currently installed at: $installedDll"
 }
 
 $backupsRoot = Join-Path $ScriptRoot "test-backups"
-$session = Find-LatestMatchingBackup $backupsRoot $TargetRoot
-$restored = @()
-if ($session) {
-    $hadPriorFile = Join-Path $session.FullName "had-prior-install.txt"
-    $hadPrior = (Test-Path $hadPriorFile) -and ((Get-Content $hadPriorFile -Raw).Trim() -eq "true")
-
-    if ($hadPrior) {
-        $backupPluginDir = Join-Path $session.FullName "plugins\$PluginFolderName"
-        $backupConfigFile = Join-Path $session.FullName "config\$ConfigFileName"
-        if (Test-Path $backupPluginDir) {
-            New-Item -ItemType Directory -Force -Path $targetPluginDir | Out-Null
-            Get-ChildItem $backupPluginDir -Recurse -File | ForEach-Object {
-                $relative = $_.FullName.Substring($backupPluginDir.Length).TrimStart('\')
-                $dest = Join-Path $targetPluginDir $relative
-                New-Item -ItemType Directory -Force -Path (Split-Path -Parent $dest) | Out-Null
-                Copy-Item $_.FullName $dest -Force
-                $restored += $dest
-            }
-        }
-        if (Test-Path $backupConfigFile) {
-            New-Item -ItemType Directory -Force -Path (Split-Path -Parent $targetConfigFile) | Out-Null
-            Copy-Item $backupConfigFile $targetConfigFile -Force
-            $restored += $targetConfigFile
-        }
-    }
-
-    Set-Content -Path (Join-Path $session.FullName "restored.txt") -Value (Get-Date -Format "o") -Encoding ASCII
-    if ($restored.Count -gt 0) {
-        Write-Host ""
-        Write-Host "Restored previous install from matching backup session: $($session.FullName)" -ForegroundColor Green
-        $restored | ForEach-Object { Write-Host "  restored: $_" }
-    } else {
-        Write-Host ""
-        Write-Host "Matching backup session had no prior Crafting Expanded install; target is now clean."
-    }
-} else {
-    Write-Host ""
-    Write-Host "No unrestored backup session recorded for this exact target; nothing was restored."
+if (-not (Test-Path $backupsRoot)) {
+    Write-Host "No test-backups\ directory found - nothing to restore."
+    return
 }
 
+$sessions = Get-ChildItem $backupsRoot -Directory | Sort-Object Name -Descending
+$targetSession = $null
+foreach ($session in $sessions) {
+    $restoredMarker = Join-Path $session.FullName "restored.txt"
+    if (Test-Path $restoredMarker) { continue }
+    $rootFile = Join-Path $session.FullName "target-root.txt"
+    if (-not (Test-Path $rootFile)) { continue }
+    $recordedRoot = (Get-Content $rootFile -Raw).Trim()
+    if ($recordedRoot -ieq $GameDir) { $targetSession = $session; break }
+}
+
+if (-not $targetSession) {
+    Write-Host "No unrestored INSTALL_TEST.ps1 backup session found for this GameDir - nothing to restore."
+    return
+}
+
+$hadPriorInstallFile = Join-Path $targetSession.FullName "had-prior-install.txt"
+$hadPriorInstall = $false
+if (Test-Path $hadPriorInstallFile) {
+    $hadPriorInstall = [bool]::Parse((Get-Content $hadPriorInstallFile -Raw).Trim())
+}
+
+if ($hadPriorInstall) {
+    $backupDll = Join-Path $targetSession.FullName "ErenshorCraftingExpanded.dll.bak"
+    if (Test-Path $backupDll) {
+        New-Item -ItemType Directory -Force -Path (Join-Path $GameDir "plugins") | Out-Null
+        Copy-Item $backupDll $installedDll -Force
+        Write-Host "Restored prior install from: $backupDll"
+    } else {
+        Write-Host "Session claims a prior install existed but its backup file is missing: $backupDll" -ForegroundColor Yellow
+    }
+} else {
+    Write-Host "Session recorded no prior install - target correctly left removed."
+}
+
+Set-Content -Path (Join-Path $targetSession.FullName "restored.txt") -Value (Get-Date -Format "o") -Encoding UTF8
 Write-Host ""
-Write-Host "REMOVE COMPLETE. No other plugin or config file in '$TargetRoot' was touched." -ForegroundColor Green
+Write-Host "REMOVE TEST OK" -ForegroundColor Green
+Write-Host "  Session restored: $($targetSession.Name)"
