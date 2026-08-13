@@ -11,6 +11,10 @@ namespace ErenshorCraftingExpanded
         internal static CraftingExpandedConfigEntry<bool> PersistWindowPosition;
         internal static CraftingExpandedConfigEntry<float> PanelOffsetX;
         internal static CraftingExpandedConfigEntry<float> PanelOffsetY;
+        internal static CraftingExpandedConfigEntry<float> LauncherX;
+        internal static CraftingExpandedConfigEntry<float> LauncherY;
+        internal static CraftingExpandedConfigEntry<float> PanelX;
+        internal static CraftingExpandedConfigEntry<float> PanelY;
 
         internal static void Initialize(CraftingExpandedSettings settings)
         {
@@ -21,6 +25,10 @@ namespace ErenshorCraftingExpanded
             PersistWindowPosition = new CraftingExpandedConfigEntry<bool>(() => settings.PersistWindowPosition, v => settings.PersistWindowPosition = v);
             PanelOffsetX = new CraftingExpandedConfigEntry<float>(() => settings.PanelOffsetX, v => settings.PanelOffsetX = v);
             PanelOffsetY = new CraftingExpandedConfigEntry<float>(() => settings.PanelOffsetY, v => settings.PanelOffsetY = v);
+            LauncherX = new CraftingExpandedConfigEntry<float>(() => settings.LauncherX, v => settings.LauncherX = v);
+            LauncherY = new CraftingExpandedConfigEntry<float>(() => settings.LauncherY, v => settings.LauncherY = v);
+            PanelX = new CraftingExpandedConfigEntry<float>(() => settings.PanelX, v => settings.PanelX = v);
+            PanelY = new CraftingExpandedConfigEntry<float>(() => settings.PanelY, v => settings.PanelY = v);
         }
     }
 }

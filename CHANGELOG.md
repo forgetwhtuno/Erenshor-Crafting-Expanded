@@ -80,3 +80,11 @@
 - Wild Herb custom item: registration, native inventory grant, stacking, zone leave/return, and a
   full game exit/restart with the same character — confirmed live by the human tester.
 - `/craftdiag` diagnostic command.
+
+
+## Unreleased - Suite UI/API coherence handoff
+
+- Added optional, versioned `CraftingControlApi` discovery/control surface for Suite Hub without a hard Hub dependency.
+- Kept standalone commands and core gameplay authority intact.
+- Documented the retained panel/launcher policy and Lunaris live-test requirement.
+- Standardized the Crafting panel on a runtime-Rect/header-only drag model, added Reset Position, persisted runtime config mutations, and kept diagnostic/asset-survey features developer-only.

@@ -4,8 +4,6 @@ using UnityEngine;
 
 namespace ErenshorCraftingExpanded
 {
-    // Loader-neutral ConfigEntry-style shim. Keeping the Value surface makes the Lunaris
-    // migration mechanical and lets the existing call sites keep their proven access pattern.
     internal sealed class CraftingExpandedConfigEntry<T>
     {
         private readonly Func<T> _get;
@@ -42,17 +40,29 @@ namespace ErenshorCraftingExpanded
             "Disabled by default until the final recipe-catalog/Sim-eligibility design is implemented.")]
         public bool EnableCraftingRequests = false;
 
-        [Config("ShowCraftingToggle", "UI", "Show the small Crafting toggle button when crafting context is relevant.")]
+        [Config("ShowCraftingToggle", "UI", "Show the Crafting on-screen launcher while a usable Suite Hub bridge is present. If Hub/bridge is unavailable, the standalone launcher is forced visible for recovery.")]
         public bool ShowCraftingToggle = true;
 
         [Config("PersistWindowPosition", "UI", "Remember the Crafting panel's dragged position between sessions.")]
         public bool PersistWindowPosition = true;
 
-        [Config("PanelOffsetX", "UI", "Persisted horizontal offset for the Crafting panel.")]
+        [Config("PanelOffsetX", "UI", "Legacy Crafting panel horizontal offset retained for config compatibility; retained-uGUI position uses PanelX.")]
         public float PanelOffsetX = 0f;
 
-        [Config("PanelOffsetY", "UI", "Persisted vertical offset for the Crafting panel.")]
+        [Config("PanelOffsetY", "UI", "Legacy Crafting panel vertical offset retained for config compatibility; retained-uGUI position uses PanelY.")]
         public float PanelOffsetY = 0f;
+
+        [Config("LauncherX", "UI", "Saved Crafting launcher horizontal position, normalized 0..1. Values outside that range recover to the safe default.")]
+        public float LauncherX = -1f;
+
+        [Config("LauncherY", "UI", "Saved Crafting launcher vertical position, normalized 0..1. Values outside that range recover to the safe default.")]
+        public float LauncherY = -1f;
+
+        [Config("PanelX", "UI", "Saved retained Crafting panel horizontal position, normalized 0..1. Values outside that range recover to the safe default.")]
+        public float PanelX = -1f;
+
+        [Config("PanelY", "UI", "Saved retained Crafting panel vertical position, normalized 0..1. Values outside that range recover to the safe default.")]
+        public float PanelY = -1f;
 
         [Config("EnableForaging", "Foraging",
             "Enable the Foraging subsystem (registry, diagnostics). Does not by itself spawn a node - see EnablePoCNode.")]

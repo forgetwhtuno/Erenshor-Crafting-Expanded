@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   Build-only script for Erenshor Crafting Expanded. Never installs anything.
 
@@ -80,11 +80,12 @@ $refs = @(
     (Join-Path $managed "netstandard.dll"),
     (Join-Path $managed "UnityEngine.dll"),
     (Join-Path $managed "UnityEngine.CoreModule.dll"),
+    (Join-Path $managed "UnityEngine.UIModule.dll"),
     (Join-Path $managed "UnityEngine.AIModule.dll"),
     (Join-Path $managed "UnityEngine.AnimationModule.dll"),
     (Join-Path $managed "UnityEngine.PhysicsModule.dll"),
     (Join-Path $managed "UnityEngine.UI.dll"),
-    (Join-Path $managed "UnityEngine.IMGUIModule.dll"),
+    (Join-Path $managed "Unity.TextMeshPro.dll"),
     (Join-Path $managed "UnityEngine.TextRenderingModule.dll"),
     (Join-Path $managed "UnityEngine.InputLegacyModule.dll"),
     (Join-Path $managed "UnityEngine.JSONSerializeModule.dll")
@@ -117,3 +118,4 @@ Write-Host "Output DLL:        $out"
 Write-Host "Erenshor assembly: $(Join-Path $managed 'Assembly-CSharp.dll')"
 Write-Host ""
 Write-Host "Nothing was installed. Run INSTALL_TEST.ps1 separately and explicitly to test it in-game."
+

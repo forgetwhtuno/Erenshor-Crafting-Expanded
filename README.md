@@ -15,11 +15,12 @@ research this mod is built against, and the top-level implementation plan for sc
   output, hot-unload event-cleanup audit, full deterministic test suite) but **has not yet been
   live-tested in a running game with Lunaris**. A legacy BepInEx release remains available in this
   repository's Git history/tags for anyone still on BepInEx.
-- **Compiles cleanly and passes its full deterministic test suite** against the actual installed
-  Erenshor/Lunaris assemblies (`BUILD.ps1` / `tests\RUN_TESTS.ps1`, 10/10 pure-logic test groups
-  pass). Every Harmony patch target (`Smithing.Combine`, `Smithing.DoSuccess`,
-  `ItemDatabase.Start`, `TypeText.CheckCommands`, `PlayerControl.LeftClick`,
-  `csMouseOrbit.LateUpdate`) and the native member assumptions this mod relies on
+- **Pre-UI-migration baseline:** compiled cleanly and passed its full deterministic test suite against the actual installed
+  Erenshor/Lunaris assemblies. The retained-uGUI candidate in this working handoff has **not** been
+  recompiled in this execution environment because the handoff omitted the native reference DLLs.
+  Gameplay Harmony targets remain `Smithing.Combine`, `Smithing.DoSuccess`, `ItemDatabase.Start`,
+  and `TypeText.CheckCommands`; the former UI-only `PlayerControl.LeftClick` / `csMouseOrbit.LateUpdate`
+  patches were removed with the IMGUI panel. Native member assumptions include
   (`ItemDatabase.itemDict`/`ItemDB`/`ItemDBList`, `Smithing.Template`/`Components`/`FuelSource`,
   `Item.TemplateIngredients`/`TemplateRewards`, `ItemIcon.QuickSmith`, `PlayerControl.myTransform`,
   `GameData.PlayerTyping`) have been independently re-verified against the currently installed
@@ -88,8 +89,10 @@ Settings are managed by Lunaris's native config system (typed `[Config]` fields,
 | General | EnableMod | true | Master switch. When false, no Harmony behavior beyond native crafting runs. |
 | Crafting | CraftHotkey | None (unbound) | Key that performs one Craft action while the forge window is open and chat isn't focused. |
 | Commissions | EnableCraftingRequests | false | Experimental PoC: let local Sims offer a single crafting commission. |
-| UI | ShowCraftingToggle | true | Show the small Crafting toggle button when crafting context is relevant. |
-| UI | PersistWindowPosition | true | Remember the Crafting panel's dragged position between sessions. |
+| UI | ShowCraftingToggle | true | Show the on-screen Crafting launcher while the Suite Hub bridge is usable. Hub/bridge failure forces the fallback launcher visible regardless. |
+| UI | PersistWindowPosition | true | Remember the retained Crafting panel's normalized dragged position between sessions. |
+| UI | LauncherX / LauncherY | -1 | Normalized launcher position; invalid/legacy values recover to a safe default. |
+| UI | PanelX / PanelY | -1 | Normalized retained-panel position; invalid/legacy values recover to a safe default. |
 | Foraging | EnableForaging | true | Enable the Foraging subsystem (registry, diagnostics). Does not by itself spawn a node. |
 | Foraging | EnablePoCNode | false | Spawn the authored node once it has real survey-verified position/visual data. Leave off. |
 | Foraging | ForageKey | G | Gather an in-range, available Foraging node. |
@@ -158,9 +161,7 @@ Crafting Expanded builds on research and examples from the Erenshor modding comm
 
 - **Erenshor-PvP — forgetwhtuno**
   This mod's own sibling project (same author, Apache-2.0-licensed, independent checkout in this
-  development environment). Its draggable/toggleable IMGUI panel and world-input-passthrough
-  prevention (`PlayerControl.LeftClick` / `csMouseOrbit.LateUpdate` Harmony prefixes) were
-  adapted for Crafting Expanded's own panel.
+  development environment). Its earlier panel/input-protection patterns informed development; the current player-facing Crafting panel is retained Unity uGUI and no longer uses UI-only `PlayerControl.LeftClick` / `csMouseOrbit.LateUpdate` Harmony prefixes. Gameplay Harmony hooks remain limited to the actual crafting/item/command surfaces described above and were adapted for Crafting Expanded's own panel.
 
 - **Erenshor-Party-Tools — forgetwhtuno**
   Same author/license as above. Established the panel offset-anchoring convention `Erenshor-PvP`
@@ -171,3 +172,18 @@ Detailed technical attribution, including exactly which files were inspected and
 copied versus independently reimplemented, is in [`docs/ATTRIBUTION.md`](docs/ATTRIBUTION.md).
 
 No endorsement by any credited project or author is implied.
+
+
+## Optional Suite Hub integration
+
+Erenshor Suite Hub is **optional**. When it is installed, this mod can expose its normal player-facing controls there through the versioned public `CraftingControlApi` surface. The mod remains independently usable without Suite Hub and does not compile against Hub types or assume Hub load order.
+
+Crafting keeps its dedicated retained-uGUI Crafting panel and fallback launcher. `/craftdiag` remains a developer/diagnostic surface rather than a normal-player requirement.
+
+Hub can show Smithing/Foraging status, enable or disable the mod-owned features, and open the Crafting panel. Forage scan, asset survey, debug placeholders, and spawn probes remain developer-only.
+
+The shared control/API and fully-in-world UI policy in this handoff are source-validated but **not yet live-tested under Lunaris hot reload**.
+
+### Content/UI migration candidate
+
+The current source replaces the Crafting player panel with retained Unity uGUI, adds a Suite-style fallback launcher plus normalized position persistence/reset, and keeps `/craftdiag` developer-only. Existing `Crafting Expanded` and `Foraging` bool descriptors remain valid, with a new **Show Crafting launcher** descriptor and Open/Close/Reset actions. Recipe, item-registration, persistence, foraging spawn/gathering, clone, and diagnostic gameplay paths were not redesigned. Native compile and live Lunaris UI/reload verification remain required for this candidate.

@@ -16,6 +16,7 @@ namespace ErenshorCraftingExpanded
         internal const string Version = "0.2.0";
         private Harmony _harmony;
         private CraftingExpandedSettings _settings;
+        private CraftingSuiteAuraProvider _auraProvider;
         private bool _loggedStartupSummary;
         private bool _runtimeReady;
 
@@ -27,6 +28,15 @@ namespace ErenshorCraftingExpanded
             string dataDir = System.IO.Path.Combine(System.IO.Path.Combine(AppContext.BaseDirectory, "plugins", "config"), "ErenshorCraftingExpanded");
             CraftingController.Initialize(_settings, dataDir);
             _harmony = new Harmony("forgetwhtuno.erenshor.craftingexpanded");
+
+            // Optional Suite Hub transport adapter. Never assumed present; registration failure
+            // must never block normal standalone crafting/foraging.
+            try
+            {
+                _auraProvider = new CraftingSuiteAuraProvider();
+                _auraProvider.Register(this);
+            }
+            catch (Exception ex) { Logging.LogError("Crafting Suite Aura provider setup failed: " + ex); }
 
             // A single missing Harmony patch target (e.g. a renamed native method after a game
             // update) would otherwise throw here and silently prevent the whole plugin from
@@ -55,8 +65,19 @@ namespace ErenshorCraftingExpanded
 
         private void Update()
         {
-            if (!_runtimeReady) return;
-            try { CraftingController.Tick(); } catch (Exception ex) { Logging.LogError("Crafting update failed: " + ex); }
+            try
+            {
+                if (_runtimeReady) CraftingController.Tick();
+                // The retained control UI remains available even when the gameplay patch set
+                // fails closed, so the user can still inspect status/re-enable settings and is
+                // never stranded without the standalone recovery surface.
+                CraftingController.TickUi(_auraProvider != null && _auraProvider.Registered);
+            }
+            catch (Exception ex)
+            {
+                SuiteDragHandler.ForceReleaseIfOwned();
+                Logging.LogError("Crafting update failed: " + ex);
+            }
             if (!_loggedStartupSummary && CraftingExpandedItems.AttemptedThisSession)
             {
                 _loggedStartupSummary = true;
@@ -80,20 +101,24 @@ namespace ErenshorCraftingExpanded
             if (!string.IsNullOrEmpty(conflict)) Logging.LogWarning("  Wild Herb id collision with existing item: " + conflict);
             if (!string.IsNullOrEmpty(failure)) Logging.LogWarning("  Wild Herb registration issue: " + failure);
         }
-        private void OnGUI() { if (!_runtimeReady) return; try { CraftingController.Draw(); } catch (Exception ex) { Logging.LogError("Crafting UI failed: " + ex); } }
         private void OnSceneLoaded(Scene scene, LoadSceneMode mode) { CraftingController.SceneTransition(); }
         private void OnSceneUnloaded(Scene scene) { CraftingController.SceneTransition(); }
 
         private void OnDestroy()
         {
-            try { CraftingCameraLookPatch.Restore(); } catch { }
+            try { SuiteDragHandler.ForceReleaseIfOwned(); } catch { }
             try { CraftingController.Shutdown(); } catch { }
+            SuiteUiPolicy.Reset();
             ErenshorCraftingExpandedPluginHolder.Instance = null;
             try { SceneManager.sceneLoaded -= OnSceneLoaded; SceneManager.sceneUnloaded -= OnSceneUnloaded; } catch { }
             try { if (_harmony != null) _harmony.UnpatchSelf(); } catch { }
             _harmony = null;
+            try { if (_auraProvider != null) _auraProvider.Unregister(); } catch { }
+            _auraProvider = null;
         }
 
+        internal bool RuntimeReady { get { return _runtimeReady; } }
+        internal void SaveSettingsPublic() { try { Config.Save(); } catch { } }
         internal void LogErrorPublic(string message) { Logging.LogError(message); }
         internal void LogInfoPublic(string message) { Logging.LogInfo(message); }
 
@@ -162,61 +187,6 @@ namespace ErenshorCraftingExpanded
             }
             catch { return true; }
         }
-    }
-
-    // Same reasoning as Erenshor-PvP's PvpPanelLeftClickPatch: IMGUI doesn't own the raw click
-    // Erenshor reads here, so a click on the Crafting panel would otherwise also affect the
-    // world (deselect target, move camera).
-    [HarmonyPatch(typeof(PlayerControl), "LeftClick")]
-    internal static class CraftingPanelLeftClickPatch
-    {
-        [HarmonyPrefix]
-        private static bool Prefix()
-        {
-            try
-            {
-                Vector2 mouse = new Vector2(Input.mousePosition.x, Screen.height - Input.mousePosition.y);
-                return !CraftingController.PointerIsOverUi(mouse);
-            }
-            catch { return true; }
-        }
-    }
-
-    [HarmonyPatch(typeof(csMouseOrbit), "LateUpdate")]
-    internal static class CraftingCameraLookPatch
-    {
-        private static csMouseOrbit _muted;
-        private static float _mutedX;
-        private static float _mutedY;
-
-        internal static void Restore()
-        {
-            csMouseOrbit orbit = _muted;
-            _muted = null;
-            if (orbit == null) return;
-            try { orbit.xSpeed = _mutedX; orbit.ySpeed = _mutedY; } catch { }
-        }
-
-        [HarmonyPrefix]
-        private static void Prefix(csMouseOrbit __instance)
-        {
-            Restore();
-            try
-            {
-                if (__instance == null) return;
-                Vector2 mouse = new Vector2(Input.mousePosition.x, Screen.height - Input.mousePosition.y);
-                if (!CraftingController.PointerIsOverUi(mouse)) return;
-                _mutedX = __instance.xSpeed;
-                _mutedY = __instance.ySpeed;
-                __instance.xSpeed = 0f;
-                __instance.ySpeed = 0f;
-                _muted = __instance;
-            }
-            catch { }
-        }
-
-        [HarmonyPostfix]
-        private static void Postfix() { Restore(); }
     }
 
     internal static class ErenshorCraftingExpandedPluginHolder
