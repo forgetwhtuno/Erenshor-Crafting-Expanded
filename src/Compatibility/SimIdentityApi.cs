@@ -32,6 +32,10 @@ namespace ErenshorCraftingExpanded
                 }
             }
             catch { }
+            result.Sort(delegate(SimIdentitySnapshot left, SimIdentitySnapshot right)
+            {
+                return CommissionPolicy.CompareCandidates(left, right);
+            });
             return result;
         }
 

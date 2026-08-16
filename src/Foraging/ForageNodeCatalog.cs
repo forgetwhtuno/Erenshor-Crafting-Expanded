@@ -6,6 +6,7 @@ namespace ErenshorCraftingExpanded
     {
         None = 0,
         MissingId,
+        MissingDisplayName,
         DuplicateId,
         InvalidScene,
         InvalidRespawn,
@@ -27,7 +28,8 @@ namespace ErenshorCraftingExpanded
     // data (unset position, missing visual-source locator) - a node definition can only reach
     // "valid" once real runtime survey evidence has been filled in (see
     // docs/FORAGING_ASSET_SURVEY.md). This is the single choke point that keeps an unauthored
-    // definition from ever spawning, even if EnablePoCNode is turned on.
+    // definition from ever spawning. Production entries are registered separately from the
+    // developer PoC candidate, so normal curated content never depends on a debug toggle.
     public sealed class ForageNodeCatalog
     {
         private readonly Dictionary<string, ForageNodeDefinition> _byId = new Dictionary<string, ForageNodeDefinition>();
@@ -35,6 +37,7 @@ namespace ErenshorCraftingExpanded
         public static ForageDefinitionRejectReason Validate(ForageNodeDefinition definition, ForageNodeCatalog existing)
         {
             if (definition == null || string.IsNullOrEmpty(definition.Id)) return ForageDefinitionRejectReason.MissingId;
+            if (string.IsNullOrEmpty(definition.DisplayName)) return ForageDefinitionRejectReason.MissingDisplayName;
             if (existing != null && existing._byId.ContainsKey(definition.Id)) return ForageDefinitionRejectReason.DuplicateId;
             if (string.IsNullOrEmpty(definition.Scene)) return ForageDefinitionRejectReason.InvalidScene;
             if (!definition.PositionSet) return ForageDefinitionRejectReason.PositionNotSet;
@@ -90,11 +93,21 @@ namespace ErenshorCraftingExpanded
 
         public int Count { get { return _byId.Count; } }
 
+        public int CountForScene(string scene)
+        {
+            if (string.IsNullOrEmpty(scene)) return 0;
+            int count = 0;
+            foreach (KeyValuePair<string, ForageNodeDefinition> entry in _byId)
+                if (string.Equals(entry.Value.Scene, scene, System.StringComparison.OrdinalIgnoreCase)) count++;
+            return count;
+        }
+
         private static ForageNodeDefinition MakeValid(string id)
         {
             return new ForageNodeDefinition
             {
                 Id = id,
+                DisplayName = "Wild Herb",
                 Scene = "PortAzure",
                 Position = new ForagePosition(1f, 2f, 3f),
                 PositionSet = true,
@@ -115,6 +128,9 @@ namespace ErenshorCraftingExpanded
 
             ForageNodeDefinition duplicate = MakeValid("WildHerb_PortAzure_01");
             if (catalog.TryRegister(duplicate) != ForageDefinitionRejectReason.DuplicateId) return "FAIL duplicate id accepted";
+
+            ForageNodeDefinition noName = MakeValid("X0"); noName.DisplayName = "";
+            if (catalog.TryRegister(noName) != ForageDefinitionRejectReason.MissingDisplayName) return "FAIL missing display name accepted";
 
             ForageNodeDefinition noScene = MakeValid("X1"); noScene.Scene = "";
             if (catalog.TryRegister(noScene) != ForageDefinitionRejectReason.InvalidScene) return "FAIL invalid scene accepted";
@@ -155,6 +171,8 @@ namespace ErenshorCraftingExpanded
             if (catalog.TryRegister(missingTintProperty) != ForageDefinitionRejectReason.InvalidTint) return "FAIL tint without shader property accepted";
 
             if (catalog.Count != 1) return "FAIL only the valid definition should have registered";
+            if (catalog.CountForScene("PortAzure") != 1) return "FAIL scene count should find authored node";
+            if (catalog.CountForScene("HiddenHills") != 0) return "FAIL scene count should exclude other zones";
 
             return "PASS forage node catalog";
         }

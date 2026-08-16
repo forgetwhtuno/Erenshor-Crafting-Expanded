@@ -17,6 +17,8 @@ namespace ErenshorCraftingExpanded
 
         private IAuraProvider<string> _describe;
         private IAuraProvider<string> _basicSettings;
+        private IAuraProvider<string> _advancedSettings;
+        private IAuraProvider<string> _uiState;
         private IAuraProvider<string, string, string> _settingSet;
         private IAuraProvider<string, string, string> _action;
         private string _version = "0.0.0";
@@ -38,6 +40,12 @@ namespace ErenshorCraftingExpanded
 
                 _basicSettings = owner.IPCAuraProvider<string>(Prefix + "settings.basic");
                 _basicSettings.RegisterFunc(BasicSettings);
+
+                _advancedSettings = owner.IPCAuraProvider<string>(Prefix + "settings.advanced");
+                _advancedSettings.RegisterFunc(AdvancedSettings);
+
+                _uiState = owner.IPCAuraProvider<string>(Prefix + "ui.state");
+                _uiState.RegisterFunc(UiState);
 
                 _settingSet = owner.IPCAuraProvider<string, string, string>(Prefix + "setting.set");
                 _settingSet.RegisterFunc(SetSetting);
@@ -61,6 +69,8 @@ namespace ErenshorCraftingExpanded
         {
             SafeUnregister(_describe); _describe = null;
             SafeUnregister(_basicSettings); _basicSettings = null;
+            SafeUnregister(_advancedSettings); _advancedSettings = null;
+            SafeUnregister(_uiState); _uiState = null;
             SafeUnregister(_settingSet); _settingSet = null;
             SafeUnregister(_action); _action = null;
             Registered = false;
@@ -94,6 +104,19 @@ namespace ErenshorCraftingExpanded
             }
         }
 
+        private string UiState()
+        {
+            try
+            {
+                return SuiteUiStatePolicy.Build(CraftingControlApi.ModuleId, CraftingController.PanelOpen,
+                    CraftingWindow.CanvasSortOrder, CraftingController.PanelActivatedAt);
+            }
+            catch
+            {
+                return SuiteUiStatePolicy.Build(CraftingControlApi.ModuleId, false, CraftingWindow.CanvasSortOrder, 0d);
+            }
+        }
+
         private string BasicSettings()
         {
             try
@@ -108,9 +131,23 @@ namespace ErenshorCraftingExpanded
             catch { return string.Empty; }
         }
 
+        private string AdvancedSettings()
+        {
+            try
+            {
+                StringBuilder sb = new StringBuilder(256);
+                AppendBoolSettingLine(sb, "commissions", "Crafting requests (experimental)",
+                    CraftingConfig.EnableCraftingRequests != null && CraftingConfig.EnableCraftingRequests.Value, "advanced");
+                AppendBoolSettingLine(sb, "coveredResources", "Covered/cave resources (experimental)",
+                    ForagingConfig.ExperimentalCoveredResources != null && ForagingConfig.ExperimentalCoveredResources.Value, "advanced");
+                return sb.ToString();
+            }
+            catch { return string.Empty; }
+        }
+
         // Every mutating call is revalidated by CraftingControlApi/CraftingController; Hub is not
-        // authorization. "ok" means accepted, not necessarily synchronously reflected in the
-        // panel - Hub re-reads state on a later frame via describe/settings.basic.
+        // authorization. "ok" means the module accepted and persisted the mutation; current Hub
+        // implementations promptly re-read describe/settings so retained controls can reflect it.
         private string SetSetting(string settingId, string value)
         {
             try
@@ -123,6 +160,10 @@ namespace ErenshorCraftingExpanded
                     return CraftingControlApi.SetEnabled(boolValue) ? "ok" : "rejected";
                 if (string.Equals(settingId, "foraging", StringComparison.Ordinal))
                     return CraftingControlApi.SetForagingEnabled(boolValue) ? "ok" : "rejected";
+                if (string.Equals(settingId, "commissions", StringComparison.Ordinal))
+                    return CraftingControlApi.SetCraftingRequestsEnabled(boolValue) ? "ok" : "rejected";
+                if (string.Equals(settingId, "coveredResources", StringComparison.Ordinal))
+                    return CraftingControlApi.SetExperimentalCoveredResources(boolValue) ? "ok" : "rejected";
                 return "unknown setting";
             }
             catch (Exception ex) { return "error:" + ex.GetType().Name; }
@@ -152,10 +193,16 @@ namespace ErenshorCraftingExpanded
 
         private static void AppendBoolSettingLine(StringBuilder sb, string id, string label, bool value)
         {
+            AppendBoolSettingLine(sb, id, label, value, "basic");
+        }
+
+        private static void AppendBoolSettingLine(StringBuilder sb, string id, string label, bool value, string tier)
+        {
             if (sb.Length > 0) sb.Append('\n');
             sb.Append("id=").Append(Uri.EscapeDataString(id));
             sb.Append("&label=").Append(Uri.EscapeDataString(label));
-            sb.Append("&tier=basic&type=bool&value=").Append(value ? "true" : "false");
+            sb.Append("&tier=").Append(Uri.EscapeDataString(tier ?? "basic"));
+            sb.Append("&type=bool&value=").Append(value ? "true" : "false");
             sb.Append("&mutable=true");
         }
     }

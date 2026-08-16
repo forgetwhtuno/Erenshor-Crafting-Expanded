@@ -112,6 +112,134 @@ namespace ErenshorCraftingExpanded
             catch { return false; }
         }
 
+        // Strict gathering grant for vanilla/native item references. Exactly one native
+        // AddItemToInv overload is selected before invocation; no ForceItemToInv and no second
+        // invocation are allowed after a native call has started.
+        internal static ForagingInventoryGrantResult GrantVanillaItemForForaging(object item, int quantity, out bool nativeInvokeStarted)
+        {
+            nativeInvokeStarted = false;
+            if (item == null || quantity <= 0) return ForagingInventoryGrantResult.ItemUnavailable;
+
+            object playerInv;
+            try { playerInv = GetStaticField("GameData", "PlayerInv"); }
+            catch { return ForagingInventoryGrantResult.NativeGrantUnavailable; }
+            if (playerInv == null) return ForagingInventoryGrantResult.NativeGrantUnavailable;
+
+            Type invType = playerInv.GetType();
+            MethodInfo addWithQty = FindMethod(invType, "AddItemToInv", item.GetType(), typeof(int));
+            if (addWithQty != null)
+            {
+                try
+                {
+                    nativeInvokeStarted = true;
+                    object result = addWithQty.Invoke(playerInv, new object[] { item, quantity });
+                    if (!(result is bool)) return ForagingInventoryGrantResult.UnknownAfterInvoke;
+                    return (bool)result ? ForagingInventoryGrantResult.Success : ForagingInventoryGrantResult.InventoryRejected;
+                }
+                catch { return ForagingInventoryGrantResult.UnknownAfterInvoke; }
+            }
+
+            if (quantity != 1) return ForagingInventoryGrantResult.NativeGrantUnavailable;
+            MethodInfo add = FindMethod(invType, "AddItemToInv", item.GetType());
+            if (add == null) return ForagingInventoryGrantResult.NativeGrantUnavailable;
+            try
+            {
+                nativeInvokeStarted = true;
+                object result = add.Invoke(playerInv, new object[] { item });
+                if (!(result is bool)) return ForagingInventoryGrantResult.UnknownAfterInvoke;
+                return (bool)result ? ForagingInventoryGrantResult.Success : ForagingInventoryGrantResult.InventoryRejected;
+            }
+            catch { return ForagingInventoryGrantResult.UnknownAfterInvoke; }
+        }
+
+        // Installed-build evidence: successful native loot plays Misc.DropItem only after normal
+        // inventory insertion succeeds, at PlayerAud.volume/2 * UIVolume * MasterVol. Sound is
+        // presentation-only and may fail silently without altering transaction authority.
+        internal static bool TryPlaySuccessfulForageSound()
+        {
+            try
+            {
+                if (GameData.PlayerAud == null || GameData.GM == null) return false;
+                Misc misc = GameData.GM.GetComponent<Misc>();
+                if (misc == null || misc.DropItem == null) return false;
+                float volume = GameData.PlayerAud.volume / 2f * GameData.UIVolume * GameData.MasterVol;
+                GameData.PlayerAud.PlayOneShot(misc.DropItem, volume);
+                return true;
+            }
+            catch { return false; }
+        }
+
+        // Optional animation adapter. StartLoot/EndLoot parameter existence is verified in the
+        // installed build, but the visual pose is not; the config default remains OFF until a live
+        // rig/equipment audition proves it suitable. Reward completion never depends on Animator.
+        internal static bool TryStartNativeGatherAnimation()
+        {
+            try
+            {
+                if (GameData.PlayerControl == null || GameData.PlayerControl.Myself == null) return false;
+                Animator animator = GameData.PlayerControl.Myself.GetMyAnim();
+                if (animator == null) return false;
+                animator.ResetTrigger("EndLoot");
+                animator.SetTrigger("StartLoot");
+                return true;
+            }
+            catch { return false; }
+        }
+
+        internal static void EndNativeGatherAnimation()
+        {
+            try
+            {
+                if (GameData.PlayerControl == null) return;
+                Animator animator = GameData.PlayerControl.GetComponent<Animator>();
+                if (animator == null && GameData.PlayerControl.Myself != null) animator = GameData.PlayerControl.Myself.GetMyAnim();
+                if (animator != null) animator.SetTrigger("EndLoot");
+            }
+            catch { }
+        }
+
+        internal static bool TryGetPlayerCurrentHp(out int hp)
+        {
+            hp = -1;
+            try
+            {
+                if (GameData.PlayerControl == null || GameData.PlayerControl.Myself == null || GameData.PlayerControl.Myself.MyStats == null) return false;
+                hp = GameData.PlayerControl.Myself.MyStats.CurrentHP;
+                return true;
+            }
+            catch { hp = -1; return false; }
+        }
+
+        internal static bool IsGlobalCombat()
+        {
+            try { return GameData.InCombat; }
+            catch { return false; }
+        }
+
+        // This intentionally reads only the local player's native NPC proxy. It does not inspect
+        // party/Sims, PvP/duel state, auto-attack UI, or GameData.InCombat; those can be true while
+        // the player is safe to harvest. A missing/changed runtime shape fails open and is recorded
+        // by the caller's diagnostic token rather than becoming a false denial.
+        internal static bool TryGetLocalHostileAggro(out bool hasAggro, out string detail)
+        {
+            hasAggro = false;
+            detail = "player-aggro-unavailable";
+            try
+            {
+                object player = GameData.PlayerControl == null ? null : GameData.PlayerControl.Myself;
+                if (player == null) return false;
+                FieldInfo proxyField = player.GetType().GetField("MyNPC", AllInstance);
+                object proxy = proxyField == null ? null : proxyField.GetValue(player);
+                if (proxy == null) { detail = "player-proxy-unavailable"; return false; }
+                FieldInfo aggroField = proxy.GetType().GetField("CurrentAggroTarget", AllInstance);
+                if (aggroField == null) { detail = "player-aggro-field-unavailable"; return false; }
+                hasAggro = aggroField.GetValue(proxy) != null;
+                detail = hasAggro ? "player-current-aggro" : "player-no-aggro";
+                return true;
+            }
+            catch { hasAggro = false; detail = "player-aggro-read-failed"; return false; }
+        }
+
         internal sealed class VisualResolution
         {
             internal GameObject Source;
@@ -124,7 +252,8 @@ namespace ErenshorCraftingExpanded
         // Resolves a definition's (VisualSourceScene, VisualSourceHierarchyPath) locator against
         // the currently loaded scene. Never returns a "close enough" guess - either the exact
         // scene+path resolves to a GameObject carrying a real renderer, or resolution fails with
-        // an explicit reason. Resolution is restricted to the player's loaded Unity scene and
+        // an explicit reason. Resolution is restricted to the loaded gameplay scene identified by
+        // GameData.SceneName/SceneManager (the player object may live in DontDestroyOnLoad) and
         // rejects duplicate hierarchy paths instead of letting GameObject.Find silently choose one.
         internal static VisualResolution TryResolveVisualSource(ForageNodeDefinition definition)
         {
@@ -138,25 +267,25 @@ namespace ErenshorCraftingExpanded
                     return result;
                 }
 
-                Scene playerScene;
-                if (!TryGetPlayerScene(out playerScene))
+                Scene gameplayScene;
+                if (!TryGetGameplayScene(out gameplayScene))
                 {
-                    result.FailureReason = "Could not resolve the player's loaded Unity scene.";
+                    result.FailureReason = "Could not resolve the loaded gameplay Unity scene.";
                     return result;
                 }
-                if (!string.Equals(playerScene.name, definition.VisualSourceScene, StringComparison.OrdinalIgnoreCase))
+                if (!string.Equals(gameplayScene.name, definition.VisualSourceScene, StringComparison.OrdinalIgnoreCase))
                 {
-                    result.FailureReason = "Player Unity scene '" + playerScene.name + "' does not match VisualSourceScene '" + definition.VisualSourceScene + "'.";
+                    result.FailureReason = "Gameplay Unity scene '" + gameplayScene.name + "' does not match VisualSourceScene '" + definition.VisualSourceScene + "'.";
                     return result;
                 }
 
                 int pathMatches;
-                GameObject candidate = FindExactHierarchyPathInScene(playerScene, definition.VisualSourceHierarchyPath, out pathMatches);
+                GameObject candidate = FindExactHierarchyPathInScene(gameplayScene, definition.VisualSourceHierarchyPath, out pathMatches);
                 if (candidate == null)
                 {
                     result.FailureReason = pathMatches > 1
-                        ? ("Hierarchy path '" + definition.VisualSourceHierarchyPath + "' is ambiguous in scene '" + playerScene.name + "' (" + pathMatches + " matches). Choose a uniquely named source path.")
-                        : ("Hierarchy path '" + definition.VisualSourceHierarchyPath + "' was not found in scene '" + playerScene.name + "'.");
+                        ? ("Hierarchy path '" + definition.VisualSourceHierarchyPath + "' is ambiguous in scene '" + gameplayScene.name + "' (" + pathMatches + " matches). Choose a uniquely named source path.")
+                        : ("Hierarchy path '" + definition.VisualSourceHierarchyPath + "' was not found in scene '" + gameplayScene.name + "'.");
                     return result;
                 }
 
@@ -356,9 +485,51 @@ namespace ErenshorCraftingExpanded
 
         internal static string SafeSceneName()
         {
+            try
+            {
+                string logical = GameData.SceneName;
+                if (!string.IsNullOrWhiteSpace(logical)) return logical;
+            }
+            catch { }
+
             Scene scene;
-            if (TryGetPlayerScene(out scene)) return scene.name ?? string.Empty;
-            try { return GameData.SceneName ?? string.Empty; } catch { return string.Empty; }
+            if (TryGetGameplayScene(out scene)) return scene.name ?? string.Empty;
+            return string.Empty;
+        }
+
+        private static bool TryGetGameplayScene(out Scene scene)
+        {
+            scene = default(Scene);
+            try
+            {
+                string logical = GameData.SceneName;
+                if (!string.IsNullOrWhiteSpace(logical))
+                {
+                    for (int i = 0; i < SceneManager.sceneCount; i++)
+                    {
+                        Scene loaded = SceneManager.GetSceneAt(i);
+                        if (loaded.IsValid() && loaded.isLoaded && string.Equals(loaded.name, logical, StringComparison.OrdinalIgnoreCase))
+                        {
+                            scene = loaded;
+                            return true;
+                        }
+                    }
+                }
+            }
+            catch { }
+
+            try
+            {
+                Scene active = SceneManager.GetActiveScene();
+                if (active.IsValid() && active.isLoaded && !string.Equals(active.name, "DontDestroyOnLoad", StringComparison.OrdinalIgnoreCase))
+                {
+                    scene = active;
+                    return true;
+                }
+            }
+            catch { }
+
+            return TryGetPlayerScene(out scene);
         }
 
         private static bool TryGetPlayerScene(out Scene scene)
@@ -374,7 +545,7 @@ namespace ErenshorCraftingExpanded
             catch { return false; }
         }
 
-        // Resolve only inside the player's verified loaded scene. Unity's GameObject.Find can
+        // Resolve only inside the verified loaded gameplay scene. Unity's GameObject.Find can
         // cross loaded scenes and silently choose the first duplicate path; authored resource
         // nodes need fail-closed, deterministic source resolution instead. Inactive objects are
         // included because Scene.GetRootGameObjects()/Transform children remain enumerable.

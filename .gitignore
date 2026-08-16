@@ -16,3 +16,8 @@ test-backups/
 .vs/
 .idea/
 .vscode/
+
+# Local verified-install sessions and staging output.
+build/
+install-backups/
+LOCAL_BUILD_RESULT.txt

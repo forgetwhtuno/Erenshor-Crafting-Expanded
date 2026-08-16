@@ -13,6 +13,7 @@ namespace ErenshorCraftingExpanded
         internal static CraftingCommission Current;
         internal static string LastRejectionReason = string.Empty;
         private static string _lastOfferedTemplateId = string.Empty;
+        private static DateTime _nextOfferUtc = DateTime.MinValue;
 
         internal static bool HasActiveCommission()
         {
@@ -24,6 +25,11 @@ namespace ErenshorCraftingExpanded
         {
             if (!CraftingConfig.EnableCraftingRequests.Value) return;
             if (HasActiveCommission()) return;
+            if (!CommissionCadencePolicy.CanOffer(DateTime.UtcNow, _nextOfferUtc))
+            {
+                LastRejectionReason = "Cooldown";
+                return;
+            }
 
             CraftRecipeSnapshot recipe = GameCraftingApi.TryGetActiveRecipe();
             if (recipe == null || string.IsNullOrEmpty(recipe.OutputItemId)) return;
@@ -69,6 +75,7 @@ namespace ErenshorCraftingExpanded
             {
                 Current.State = CommissionState.Declined;
                 Current = null;
+                _nextOfferUtc = CommissionCadencePolicy.NextAllowed(DateTime.UtcNow, CommissionCadencePolicy.DeclineCooldownMinutes);
             }
         }
 
@@ -83,6 +90,7 @@ namespace ErenshorCraftingExpanded
 
             Current.State = CommissionState.Completed;
             Current.CompletedUtc = DateTime.UtcNow;
+            _nextOfferUtc = CommissionCadencePolicy.NextAllowed(DateTime.UtcNow, CommissionCadencePolicy.CompleteCooldownMinutes);
             return true;
         }
 
@@ -102,6 +110,25 @@ namespace ErenshorCraftingExpanded
 
             Current.State = CommissionState.Invalidated;
             Current = null;
+            _nextOfferUtc = CommissionCadencePolicy.NextAllowed(DateTime.UtcNow, CommissionCadencePolicy.SceneInvalidationCooldownMinutes);
+        }
+
+        internal static void OnGameplayDisabled()
+        {
+            // The commission PoC is scene-local gameplay state, not durable progression. Turning
+            // the master gameplay switch off must not leave an accepted request waiting invisibly
+            // to resume later. Preserve any existing cadence deadline; only clear runtime state.
+            if (Current != null && (Current.State == CommissionState.Offered || Current.State == CommissionState.Accepted))
+                Current.State = CommissionState.Invalidated;
+            Current = null;
+            _lastOfferedTemplateId = string.Empty;
+        }
+
+        internal static void Shutdown()
+        {
+            OnGameplayDisabled();
+            _nextOfferUtc = DateTime.MinValue;
+            LastRejectionReason = string.Empty;
         }
 
         internal static void OnForgeClosed()
@@ -121,6 +148,7 @@ namespace ErenshorCraftingExpanded
             {
                 Current.State = CommissionState.Invalidated;
                 Current = null;
+                _nextOfferUtc = CommissionCadencePolicy.NextAllowed(DateTime.UtcNow, CommissionCadencePolicy.SceneInvalidationCooldownMinutes);
             }
             _lastOfferedTemplateId = string.Empty;
         }

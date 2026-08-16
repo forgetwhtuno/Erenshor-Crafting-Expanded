@@ -42,7 +42,7 @@ namespace ErenshorCraftingExpanded
         {
             CraftingControlState s = GetBasicState();
             if (!s.RuntimeReady) return "Crafting runtime unavailable (patch set failed closed)";
-            return !s.Enabled ? "Crafting Expanded disabled" : "Smithing Lv" + s.SmithingLevel + " | Foraging " + (s.ForagingEnabled ? "on" : "off");
+            return !s.Enabled ? "Crafting Expanded disabled" : "Crafting Lv" + s.SmithingLevel + " | Foraging " + ForageNodeController.DescribeCompactStatus();
         }
         public static bool GetShowLauncher() { return CraftingController.ShowStandaloneLauncher; }
         public static bool SetShowLauncher(bool value) { CraftingController.SetShowStandaloneLauncher(value); return true; }
@@ -52,5 +52,7 @@ namespace ErenshorCraftingExpanded
         public static void ResetLauncherPosition() { CraftingController.ResetLauncherPosition(); }
         public static bool SetEnabled(bool enabled) { CraftingController.SetEnabled(enabled); return true; }
         public static bool SetForagingEnabled(bool enabled) { CraftingController.SetForagingEnabled(enabled); return true; }
+        public static bool SetCraftingRequestsEnabled(bool enabled) { CraftingController.SetCraftingRequestsEnabled(enabled); return true; }
+        public static bool SetExperimentalCoveredResources(bool enabled) { CraftingController.SetExperimentalCoveredResources(enabled); return true; }
     }
 }

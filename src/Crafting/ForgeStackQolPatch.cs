@@ -21,6 +21,7 @@ namespace ErenshorCraftingExpanded
                 if (!CraftingConfig.EnableMod.Value) return;
                 CraftRecipeSnapshot recipe = GameCraftingApi.TryGetActiveRecipe();
                 if (recipe == null || GameCraftingApi.IsSpecialCombineTemplate(recipe.TemplateItemId)) return;
+                if (!CustomRecipeCombineGatePatch.IsRecipeAllowed(recipe, false)) return;
                 int moved = GameCraftingApi.FillComponentsForOneCraft(recipe);
                 CraftingController.OnAutoFillAttempt(moved);
             }

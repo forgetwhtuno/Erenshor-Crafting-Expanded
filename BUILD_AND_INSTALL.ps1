@@ -1,56 +1,24 @@
-<#
-.SYNOPSIS
-  One-shot build + install for Erenshor Crafting Expanded. NO backup is taken.
+param([string]$GameDir = "", [string]$LunarisLibDir = "")
 
-.DESCRIPTION
-  Convenience wrapper for fast local iteration. Builds via BUILD.ps1, then copies the resulting
-  DLL straight into <GameDir>\plugins\ErenshorCraftingExpanded.dll, overwriting whatever is
-  already there. If you want a reversible test install with an automatic backup/restore session,
-  use INSTALL_TEST.ps1 / REMOVE_TEST.ps1 instead.
-
-.PARAMETER GameDir
-  Erenshor install directory. Auto-detected if omitted.
-
-.PARAMETER LunarisLibDir
-  Folder containing Lunaris.dll/0Harmony.dll for compilation references. Auto-detected if omitted.
-#>
-param(
-    [string]$GameDir = "",
-    [string]$LunarisLibDir = ""
-)
-
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = 'Stop'
 $ScriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+. (Join-Path $ScriptRoot 'BuildSupport.ps1')
 
-Write-Host "=== Erenshor Crafting Expanded - build and install (no backup) ===" -ForegroundColor Cyan
-Write-Host "This overwrites any existing plugins\ErenshorCraftingExpanded.dll with no backup." -ForegroundColor Yellow
-Write-Host "Use INSTALL_TEST.ps1 instead if you want a reversible, backed-up install." -ForegroundColor Yellow
-
-& (Join-Path $ScriptRoot "BUILD.ps1") -GameDir $GameDir -LunarisLibDir $LunarisLibDir
-if ($LASTEXITCODE -ne 0) { throw "Build failed; nothing installed." }
-
-# Re-resolve GameDir the same way BUILD.ps1 did, since BUILD.ps1 runs in its own scope.
-if (-not $GameDir -or -not (Test-Path (Join-Path $GameDir "Erenshor.exe"))) {
-    $candidates = @()
-    if (${env:ProgramFiles(x86)}) { $candidates += Join-Path ${env:ProgramFiles(x86)} "Steam\steamapps\common\Erenshor" }
-    if ($env:ProgramFiles) { $candidates += Join-Path $env:ProgramFiles "Steam\steamapps\common\Erenshor" }
-    foreach ($drive in @("C","D","E","F")) { $candidates += "${drive}:\SteamLibrary\steamapps\common\Erenshor" }
-    $GameDir = $null
-    foreach ($candidate in ($candidates | Select-Object -Unique)) {
-        if (Test-Path (Join-Path $candidate "Erenshor.exe")) { $GameDir = (Resolve-Path $candidate).Path; break }
-    }
-    if (-not $GameDir) { throw "Erenshor installation not found. Pass -GameDir 'C:\path\to\Erenshor'." }
-}
-
-$builtDll = Join-Path $ScriptRoot "bin\ErenshorCraftingExpanded.dll"
-if (-not (Test-Path $builtDll)) { throw "Expected build output not found: $builtDll" }
-
-$pluginsDir = Join-Path $GameDir "plugins"
-New-Item -ItemType Directory -Force -Path $pluginsDir | Out-Null
-$installedDll = Join-Path $pluginsDir "ErenshorCraftingExpanded.dll"
-Copy-Item $builtDll $installedDll -Force
-
-Write-Host ""
-Write-Host "INSTALLED (no backup taken)" -ForegroundColor Green
-Write-Host "  $installedDll"
-Write-Host "Restart Erenshor (or use Lunaris's reload if available) to pick up the change."
+Write-Host 'LOCAL DIRTY SOURCE BUILD - Crafting / Foraging' -ForegroundColor Yellow
+$GameDir = Resolve-CraftingGameDir $GameDir
+& (Join-Path $ScriptRoot 'tests\RUN_TESTS.ps1')
+if ($LASTEXITCODE -ne 0) { throw 'Deterministic tests failed; nothing installed.' }
+& (Join-Path $ScriptRoot 'BUILD.ps1') -GameDir $GameDir -LunarisLibDir $LunarisLibDir
+if ($LASTEXITCODE -ne 0) { throw 'Build failed; nothing installed.' }
+$builtDll = Join-Path $ScriptRoot 'bin\ErenshorCraftingExpanded.dll'
+$installed = Install-CraftingDllVerified -BuiltDll $builtDll -GameDir $GameDir -BackupRoot (Join-Path $ScriptRoot 'install-backups')
+$resultFile = Join-Path $ScriptRoot 'LOCAL_BUILD_RESULT.txt'
+@("version=0.2.3", "gameDir=$GameDir", "installed=$($installed.Destination)", "sha256=$($installed.Hash)", "backup=$($installed.Backup)", "completedUtc=$([DateTime]::UtcNow.ToString('o'))") | Set-Content -LiteralPath $resultFile -Encoding UTF8
+Write-Host '============================================================' -ForegroundColor Green
+Write-Host 'CRAFTING / FORAGING BUILD AND INSTALL COMPLETED SUCCESSFULLY' -ForegroundColor Green
+Write-Host '============================================================' -ForegroundColor Green
+Write-Host "Built DLL: $builtDll"
+Write-Host "Installed DLL: $($installed.Destination)"
+Write-Host "SHA-256: $($installed.Hash)"
+Write-Host "Backup: $($installed.Backup)"
+Write-Host "Result: $resultFile"

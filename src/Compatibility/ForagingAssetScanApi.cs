@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 namespace ErenshorCraftingExpanded
 {
@@ -25,6 +26,7 @@ namespace ErenshorCraftingExpanded
         internal List<string> ShaderNames = new List<string>();
         internal List<string> ColorPropertyNames = new List<string>();
         internal bool ActiveInHierarchy;
+        internal GameObject SourceObject;
         internal List<string> ComponentTypeNames = new List<string>();
     }
 
@@ -47,11 +49,51 @@ namespace ErenshorCraftingExpanded
         internal readonly ForagingScanRejectionSummary Rejected = new ForagingScanRejectionSummary();
     }
 
-    // Development-only asset survey. The first live scan showed why positive environmental
-    // filtering matters: the nearest renderers were the player's eyebrows/armor/effects. This
-    // implementation excludes the current player hierarchy and Crafting Expanded's own clones,
-    // rejects effect/no-mesh renderers, then ranks clone-compatible environmental meshes by
-    // approximate size and distance. It never runs from Update().
+    internal sealed class ForageVisualSourceSet
+    {
+        private readonly Dictionary<ForageResourcePool, RendererScanResult> _sources =
+            new Dictionary<ForageResourcePool, RendererScanResult>();
+        private readonly Dictionary<ForageResourcePool, string> _summaries =
+            new Dictionary<ForageResourcePool, string>();
+
+        internal string ScanSummary = string.Empty;
+
+        internal RendererScanResult Get(ForageResourcePool pool)
+        {
+            RendererScanResult value;
+            return _sources.TryGetValue(pool, out value) ? value : null;
+        }
+
+        internal string GetSummary(ForageResourcePool pool)
+        {
+            string value;
+            return _summaries.TryGetValue(pool, out value) ? value : string.Empty;
+        }
+
+        internal bool Has(ForageResourcePool pool)
+        {
+            RendererScanResult value;
+            return _sources.TryGetValue(pool, out value) && value != null && value.SourceObject != null;
+        }
+
+        internal void Set(ForageResourcePool pool, RendererScanResult source, string summary)
+        {
+            _sources[pool] = source;
+            _summaries[pool] = summary ?? string.Empty;
+        }
+
+        // Compatibility accessors retained for existing diagnostics/callers.
+        internal RendererScanResult OpenHerb { get { return Get(ForageResourcePool.OpenHerbs); } }
+        internal RendererScanResult CoveredFungus { get { return Get(ForageResourcePool.CoveredFungi); } }
+        internal string OpenHerbSummary { get { return GetSummary(ForageResourcePool.OpenHerbs); } }
+        internal string CoveredFungusSummary { get { return GetSummary(ForageResourcePool.CoveredFungi); } }
+    }
+
+    // Scene-bounded environmental mesh survey. Explicit /craftdiag scans use the detailed report,
+    // and the Wild Herb auto-placement slice reuses the same filtered evidence once per spawn
+    // attempt to select a believable plant clone source. It never runs every frame. The first live
+    // scan showed why positive environmental filtering matters: naive nearest-renderer selection
+    // returned player eyebrows/armor/effects, so those hierarchies remain excluded before ranking.
     internal static class ForagingAssetScanApi
     {
         internal static string BuildHierarchyPath(Transform transform)
@@ -77,13 +119,7 @@ namespace ErenshorCraftingExpanded
             Transform playerRoot = GameForagingApi.TryGetPlayerTransform(out playerTransform) && playerTransform != null
                 ? playerTransform.root
                 : null;
-            int playerSceneHandle = -1;
-            try
-            {
-                if (playerTransform != null && playerTransform.gameObject != null && playerTransform.gameObject.scene.IsValid())
-                    playerSceneHandle = playerTransform.gameObject.scene.handle;
-            }
-            catch { playerSceneHandle = -1; }
+            int playerSceneHandle = ResolveGameplaySceneHandle(playerTransform);
 
             Renderer[] all = UnityEngine.Object.FindObjectsOfType<Renderer>();
             report.Rejected.TotalRenderers = all == null ? 0 : all.Length;
@@ -202,7 +238,8 @@ namespace ErenshorCraftingExpanded
                     MaterialNames = materialNames,
                     ShaderNames = shaderNames,
                     ColorPropertyNames = colorPropertyNames,
-                    ActiveInHierarchy = renderer.gameObject.activeInHierarchy
+                    ActiveInHierarchy = renderer.gameObject.activeInHierarchy,
+                    SourceObject = renderer.gameObject
                 };
 
                 foreach (Component component in renderer.GetComponents<Component>())
@@ -215,6 +252,64 @@ namespace ErenshorCraftingExpanded
             if (maxResults > 0 && report.Results.Count > maxResults)
                 report.Results.RemoveRange(maxResults, report.Results.Count - maxResults);
             return report;
+        }
+
+        internal static RendererScanResult FindBestForageClusterSource(Vector3 origin, float radiusMeters, out string summary)
+        {
+            ForageVisualSourceSet sources = FindBestForageClusterSources(origin, radiusMeters);
+            summary = sources.OpenHerbSummary;
+            return sources.OpenHerb;
+        }
+
+        // One scene renderer scan scores every supported resource visual family. Adding a family therefore
+        // does not multiply Resources/renderer enumeration work during placement.
+        internal static ForageVisualSourceSet FindBestForageClusterSources(Vector3 origin, float radiusMeters)
+        {
+            ForageVisualSourceSet set = new ForageVisualSourceSet();
+            ForagingScanReport report = ScanNearby(origin, radiusMeters, 192, string.Empty);
+            ForageResourcePool[] pools = ForageEnvironmentPolicy.AllPools();
+
+            for (int poolIndex = 0; poolIndex < pools.Length; poolIndex++)
+            {
+                ForageResourcePool pool = pools[poolIndex];
+                RendererScanResult best = null;
+                int bestScore = int.MinValue;
+
+                for (int i = 0; i < report.Results.Count; i++)
+                {
+                    RendererScanResult entry = report.Results[i];
+                    if (entry == null) continue;
+                    float largest = Mathf.Max(entry.BoundsSize.x, Mathf.Max(entry.BoundsSize.y, entry.BoundsSize.z));
+                    int score = ForageVisualPolicy.ScoreCandidate(
+                        entry.HierarchyPath, entry.GameObjectName, entry.MeshName, largest, pool);
+                    if (score <= bestScore) continue;
+                    best = entry;
+                    bestScore = score;
+                }
+
+                if (best != null && best.SourceObject != null && bestScore != int.MinValue)
+                    set.Set(pool, best, FormatVisualChoice(best, bestScore));
+                else
+                    set.Set(pool, null, "no cloneable mesh matched explicit " +
+                        ForageVisualPolicy.EvidenceDescription(pool) + " evidence in current gameplay scene");
+            }
+
+            set.ScanSummary = FormatRejectionSummary(report.Rejected);
+            for (int poolIndex = 0; poolIndex < pools.Length; poolIndex++)
+            {
+                ForageResourcePool pool = pools[poolIndex];
+                if (!set.Has(pool))
+                    set.Set(pool, null, set.GetSummary(pool) + "; " + set.ScanSummary);
+            }
+            return set;
+        }
+
+        private static string FormatVisualChoice(RendererScanResult best, int score)
+        {
+            return "source=" + best.GameObjectName +
+                " mesh=" + best.MeshName +
+                " bounds=(" + best.BoundsSize.x.ToString("F2") + "," + best.BoundsSize.y.ToString("F2") + "," + best.BoundsSize.z.ToString("F2") + ")" +
+                " score=" + score;
         }
 
         internal static string FormatEntry(int index, RendererScanResult entry)
@@ -273,6 +368,39 @@ namespace ErenshorCraftingExpanded
         }
 
 
+        private static int ResolveGameplaySceneHandle(Transform playerTransform)
+        {
+            // PlayerControl can live under DontDestroyOnLoad in the current build, so its Transform
+            // scene is not a reliable zone discriminator. Prefer the game's logical scene name,
+            // then Unity's active scene, and only then fall back to the player Transform scene.
+            try
+            {
+                string logicalName = GameData.SceneName;
+                if (!string.IsNullOrWhiteSpace(logicalName))
+                {
+                    Scene named = SceneManager.GetSceneByName(logicalName);
+                    if (named.IsValid() && named.isLoaded) return named.handle;
+                }
+            }
+            catch { }
+
+            try
+            {
+                Scene active = SceneManager.GetActiveScene();
+                if (active.IsValid() && active.isLoaded && !string.Equals(active.name, "DontDestroyOnLoad", StringComparison.OrdinalIgnoreCase))
+                    return active.handle;
+            }
+            catch { }
+
+            try
+            {
+                if (playerTransform != null && playerTransform.gameObject != null && playerTransform.gameObject.scene.IsValid())
+                    return playerTransform.gameObject.scene.handle;
+            }
+            catch { }
+            return -1;
+        }
+
         private static string SafeSceneName(Renderer renderer)
         {
             try
@@ -320,6 +448,9 @@ namespace ErenshorCraftingExpanded
             {
                 string name = current.name ?? string.Empty;
                 if (name.StartsWith("ForageNode_", StringComparison.Ordinal) ||
+                    name.StartsWith("ForageCluster_", StringComparison.Ordinal) ||
+                    name.StartsWith("ForageAutoTrial_", StringComparison.Ordinal) ||
+                    name.StartsWith("ForageResourceLabel", StringComparison.Ordinal) ||
                     name.StartsWith("ErenshorCraftingExpanded", StringComparison.OrdinalIgnoreCase))
                     return true;
                 current = current.parent;
