@@ -224,7 +224,7 @@ Template state, and safe recovery action without hardcoding recipe-specific UI.
   `docs/` record earlier disassembly/verification work; after an Erenshor update, rebuild and
   re-verify those assumptions against that machine's current `Assembly-CSharp.dll`.
 - **Optional integration:** none currently. Adapts UI/input-protection *code patterns* from this
-  author's own `Erenshor-PvP` (see Acknowledgements) but has no runtime dependency on it or any
+  author's own `ForgottenRoads-PvP` (see Acknowledgements) but has no runtime dependency on it or any
   other mod in the suite.
 - Vanilla Mining and Fishing are untouched by design; this mod only adds a new, separate Foraging
   system.
@@ -272,12 +272,12 @@ Crafting Expanded builds on research and examples from the Erenshor modding comm
   in that repository); the registration technique was independently reimplemented against this
   build's own disassembled `Assembly-CSharp.dll`.
 
-- **Erenshor-PvP — forgetwhtuno**
+- **ForgottenRoads-PvP — forgetwhtuno**
   This mod's own sibling project (same author, Apache-2.0-licensed, independent checkout in this
   development environment). Its earlier panel/input-protection patterns informed development; the current player-facing Crafting panel is retained Unity uGUI and no longer uses UI-only `PlayerControl.LeftClick` / `csMouseOrbit.LateUpdate` Harmony prefixes. Gameplay Harmony hooks remain limited to the actual crafting/item/command surfaces described above and were adapted for Crafting Expanded's own panel.
 
 - **Erenshor-Party-Tools — forgetwhtuno**
-  Same author/license as above. Established the panel offset-anchoring convention `Erenshor-PvP`
+  Same author/license as above. Established the panel offset-anchoring convention `ForgottenRoads-PvP`
   (and in turn this mod) follows, and its `RUN_TESTS.ps1` shape is the template for this mod's
   own pure-logic test runner.
 
