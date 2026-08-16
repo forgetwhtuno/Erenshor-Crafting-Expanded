@@ -1,5 +1,7 @@
 # Erenshor Crafting Expanded
 
+Part of the **Forgotten Roads for Erenshor** mod collection.
+
 A horizontal-progression expansion to Erenshor's native crafting: forge quality-of-life, Smithing
 progression, a crafting-commission proof-of-concept, and a new Foraging gathering system built on
 mod-owned nodes (vanilla Mining and Fishing are untouched). See `docs/` for the full native-API
@@ -287,7 +289,7 @@ No endorsement by any credited project or author is implied.
 
 ## Optional Suite Hub integration
 
-Erenshor Suite Hub is **optional**. When it is installed, this mod can expose its normal player-facing controls there through the versioned public `CraftingControlApi` surface. The mod remains independently usable without Suite Hub and does not compile against Hub types or assume Hub load order.
+Forgotten Roads Hub is **optional**. When it is installed, this mod can expose its normal player-facing controls there through the versioned public `CraftingControlApi` surface. The mod remains independently usable without the Hub and does not compile against Hub types or assume Hub load order.
 
 Crafting keeps its dedicated retained-uGUI Crafting panel and fallback launcher. `/craftdiag` remains a developer/diagnostic surface rather than a normal-player requirement.
 
