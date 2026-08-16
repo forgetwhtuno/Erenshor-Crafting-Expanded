@@ -287,3 +287,7 @@
 - Kept standalone commands and core gameplay authority intact.
 - Documented the retained panel/launcher policy and Lunaris live-test requirement.
 - Standardized the Crafting panel on a runtime-Rect/header-only drag model, added Reset Position, persisted runtime config mutations, and kept diagnostic/asset-survey features developer-only.
+## 0.2.4 - Forgotten Roads launcher/header chrome
+
+- Standardized the standalone retained-uGUI launcher at 154x32 with programmatic grip marks and collection hover/pressed colors.
+- Replaced font-dependent collapse triangles with mod-owned Image chevrons while preserving panel behavior.

@@ -12,6 +12,11 @@ namespace ErenshorCraftingExpanded
         internal const float CommissionHeight = 685f;
         internal const float HeaderHeight = 32f;
         internal const float CollapsedHeight = HeaderHeight;
+        internal const float HeaderControlWidth = 28f;
+        internal const float HeaderControlHeight = 24f;
+        internal const float HeaderLeftControlInset = 4f;
+        internal const float HeaderTitleLeftInset = 38f;
+        internal const float HeaderRightControlsWidth = 70f;
         internal const float HeaderBodyGap = 10f;
         internal const float OuterInset = 10f;
         internal const float FooterHeight = 116f;
@@ -127,6 +132,12 @@ namespace ErenshorCraftingExpanded
         {
             if (HeightFor(false) != CompactHeight) return "FAIL compact panel envelope";
             if (HeightForCollapsed() != HeaderHeight) return "FAIL collapsed panel should be header-only";
+            if (HeaderLeftControlInset + HeaderControlWidth >= HeaderTitleLeftInset)
+                return "FAIL header collapse control overlaps title";
+            if (HeaderRightControlsWidth < (HeaderControlWidth * 2f))
+                return "FAIL header right controls reserve too small";
+            if (HeaderControlHeight > HeaderHeight)
+                return "FAIL header control taller than header";
             if (HeightFor(true) != CommissionHeight) return "FAIL commission panel envelope";
             if (CompactHeight >= CommissionHeight) return "FAIL commission mode should have larger envelope";
             if (Width < 400f || Width > 520f) return "FAIL profession panel width bound";

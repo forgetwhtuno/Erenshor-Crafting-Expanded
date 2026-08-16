@@ -7,7 +7,7 @@ progression, a crafting-commission proof-of-concept, and a new Foraging gatherin
 mod-owned nodes (vanilla Mining and Fishing are untouched). See `docs/` for the full native-API
 research this mod is built against, and the top-level implementation plan for scope boundaries.
 
-## Status: Gather-interaction playable candidate (0.2.3)
+## Status: Gather-interaction + retained-UI visual candidate (0.2.4)
 
 - **0.2.3 is a focused Foraging interaction/transaction pass over the merged 0.2.2 loop.** It does not
   add resources or recipes. A confirmed resource left-click now starts a 1.25-second mod-owned channel
@@ -248,8 +248,8 @@ acceptance**; and crafting commissions remain an off-by-default PoC.
 
 ## Development / build information
 
-This project has been developed with substantial AI-assisted coding, guided through design,
-testing, playtesting, and audits against the actual installed game assembly. Bug reports, code
+This project is guided through design, testing, playtesting, and audits against the actual installed
+game assembly. Bug reports, code
 review, corrections, and contributions from experienced Erenshor modders are welcome.
 
 Build/test procedure and architecture boundaries for contributors (human or AI) are documented in

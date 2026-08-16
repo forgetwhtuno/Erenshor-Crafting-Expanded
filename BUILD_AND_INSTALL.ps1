@@ -13,7 +13,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Build failed; nothing installed.' }
 $builtDll = Join-Path $ScriptRoot 'bin\ErenshorCraftingExpanded.dll'
 $installed = Install-CraftingDllVerified -BuiltDll $builtDll -GameDir $GameDir -BackupRoot (Join-Path $ScriptRoot 'install-backups')
 $resultFile = Join-Path $ScriptRoot 'LOCAL_BUILD_RESULT.txt'
-@("version=0.2.3", "gameDir=$GameDir", "installed=$($installed.Destination)", "sha256=$($installed.Hash)", "backup=$($installed.Backup)", "completedUtc=$([DateTime]::UtcNow.ToString('o'))") | Set-Content -LiteralPath $resultFile -Encoding UTF8
+@("version=0.2.4", "gameDir=$GameDir", "installed=$($installed.Destination)", "sha256=$($installed.Hash)", "backup=$($installed.Backup)", "completedUtc=$([DateTime]::UtcNow.ToString('o'))") | Set-Content -LiteralPath $resultFile -Encoding UTF8
 Write-Host '============================================================' -ForegroundColor Green
 Write-Host 'CRAFTING / FORAGING BUILD AND INSTALL COMPLETED SUCCESSFULLY' -ForegroundColor Green
 Write-Host '============================================================' -ForegroundColor Green
