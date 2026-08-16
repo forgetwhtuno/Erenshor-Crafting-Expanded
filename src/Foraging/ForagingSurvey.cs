@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Text;
 using UnityEngine;
 
 namespace ErenshorCraftingExpanded
@@ -25,11 +27,21 @@ namespace ErenshorCraftingExpanded
             }
 
             string scene = GameForagingApi.SafeSceneName();
-            ChatLine("Forage position:");
-            ChatLine("  scene=" + scene);
-            ChatLine("  position=(" + position.x.ToString("F2") + ", " + position.y.ToString("F2") + ", " + position.z.ToString("F2") + ")");
-            if (haveYaw) ChatLine("  yaw=" + yaw.ToString("F1"));
-            ChatLine("Copy these values into a ForageNodeDefinition's Scene/Position/PositionSet=true.");
+            if (!haveYaw)
+            {
+                ChatLine("Forage position: position resolved, but player yaw could not be read. Move/retry before authoring this node; no RotationY value was guessed.");
+                return;
+            }
+
+            string yawLiteral = FloatLiteral(yaw);
+            string snippet = BuildDefinitionSnippet(scene, position, yawLiteral);
+
+            ChatLine("Forage position: scene=" + scene);
+            ChatLine("  position=(" + FloatLiteral(position.x) + ", " + FloatLiteral(position.y) + ", " + FloatLiteral(position.z) + ") yaw=" + yawLiteral);
+            ChatLine("Paste-ready ForageNodeDefinition skeleton follows (visual source intentionally blank):");
+            string[] snippetLines = snippet.Split(new char[] { '\n' });
+            for (int i = 0; i < snippetLines.Length; i++) ChatLine(snippetLines[i]);
+            CraftingController.LogInfo("=== /craftdiag forage pos paste-ready definition ===\n" + snippet);
         }
 
         internal static void ReportScan(string filter)
@@ -82,6 +94,37 @@ namespace ErenshorCraftingExpanded
             ChatLine("Top-ranked environmental candidate: mesh=" + closest.MeshName + " shader=" +
                 (closest.ShaderNames.Count == 0 ? "(none)" : string.Join(", ", closest.ShaderNames.ToArray())));
             ChatLine("  tint properties: " + colorProps + " (see log for path/material/components)");
+        }
+
+        private static string BuildDefinitionSnippet(string scene, Vector3 position, string yawLiteral)
+        {
+            StringBuilder sb = new StringBuilder();
+            sb.AppendLine("catalog.TryRegister(new ForageNodeDefinition");
+            sb.AppendLine("{");
+            sb.AppendLine("    Id = \"REPLACE_ID\",");
+            sb.AppendLine("    DisplayName = \"REPLACE_NAME\",");
+            sb.AppendLine("    Scene = \"" + EscapeCSharp(scene) + "\",");
+            sb.AppendLine("    Position = new ForagePosition(" + FloatLiteral(position.x) + "f, " + FloatLiteral(position.y) + "f, " + FloatLiteral(position.z) + "f),");
+            sb.AppendLine("    PositionSet = true,");
+            sb.AppendLine("    RotationY = " + yawLiteral + "f,");
+            sb.AppendLine("    // Fill both values only from /craftdiag forage scan [filter].");
+            sb.AppendLine("    VisualSourceScene = \"\",");
+            sb.AppendLine("    VisualSourceHierarchyPath = \"\",");
+            sb.AppendLine("    RewardItemId = CraftingExpandedItemIds.WildHerbId,");
+            sb.AppendLine("    RewardQuantity = 1,");
+            sb.AppendLine("    RespawnSeconds = 300f");
+            sb.Append("});");
+            return sb.ToString();
+        }
+
+        private static string FloatLiteral(float value)
+        {
+            return value.ToString("R", CultureInfo.InvariantCulture);
+        }
+
+        private static string EscapeCSharp(string value)
+        {
+            return (value ?? string.Empty).Replace("\\", "\\\\").Replace("\"", "\\\"");
         }
 
         private static void ChatLine(string text)

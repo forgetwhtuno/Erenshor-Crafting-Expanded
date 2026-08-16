@@ -12,6 +12,9 @@ namespace ErenshorCraftingExpanded
         public CustomItemRegistrationState State;
         public string ConflictingExistingItemName;
         public string FailureReason;
+        public string BaseItemName;
+        public string BaseItemId;
+        public string BaseSelectionReason;
     }
 
     // The only place custom-item registration touches ItemDatabase internals via reflection -
@@ -25,19 +28,33 @@ namespace ErenshorCraftingExpanded
         private const BindingFlags AllStatic = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static;
         private const string OwnershipNamePrefix = "ErenshorCraftingExpanded::";
 
-        // Ids this mod itself has successfully inserted into the live itemDict this session -
-        // the only way "nativeEntryIsOwnedByUs" can be answered truthfully, since a native Item
-        // instance carries no "who registered me" marker of its own.
+        // Runtime lookup cache for item objects this plugin has verified/inserted. Ownership of an
+        // existing live native entry is never inferred from this cache; the explicit Unity object
+        // marker on that entry is authoritative so an ItemDatabase rebuild cannot turn a foreign
+        // same-id item into an assumed-owned object.
         private static readonly HashSet<string> OwnedIds = new HashSet<string>();
         private static readonly Dictionary<string, object> ResolvedItemsById = new Dictionary<string, object>();
 
         internal static string LastBaseItemName = string.Empty;
         internal static string LastBaseItemId = string.Empty;
+        internal static string LastBaseSelectionReason = string.Empty;
 
         private static FieldInfo _itemDictField;
         private static FieldInfo _itemDbField;
         private static FieldInfo _itemDbListField;
         private static bool _reflectionResolved;
+
+        internal static void ResetSessionBindings()
+        {
+            // Do not remove anything from native ItemDatabase here. Existing marked entries may be
+            // needed to resolve save inventory while the plugin is installed. Only discard stale
+            // managed lookup bindings so the next registration pass must revalidate the live DB.
+            OwnedIds.Clear();
+            ResolvedItemsById.Clear();
+            LastBaseItemName = string.Empty;
+            LastBaseItemId = string.Empty;
+            LastBaseSelectionReason = string.Empty;
+        }
 
         internal static bool TryRegisterAll(object itemDatabaseInstance, IEnumerable<CustomItemDefinition> definitions, List<CustomItemRegistrationOutcome> outcomes)
         {
@@ -45,31 +62,54 @@ namespace ErenshorCraftingExpanded
             ResolveReflectionOnce(itemDatabaseInstance.GetType());
             if (!_reflectionResolved) return false;
 
-            object baseItem = FindSafeBaseItem(itemDatabaseInstance);
-            LastBaseItemName = baseItem != null ? ReadName(baseItem) : "(none found)";
-            LastBaseItemId = baseItem != null ? ReadId(baseItem) : string.Empty;
+            // A late Lunaris load can observe GameData.ItemDB after the native singleton field is
+            // assigned but before ItemDatabase.Start() has populated its backing collection. Do
+            // not consume the one-shot registration attempt against that half-initialized state;
+            // the caller will retry after the database contains ordinary native items.
+            IList liveItemDb = _itemDbField.GetValue(itemDatabaseInstance) as IList;
+            if (liveItemDb == null || liveItemDb.Count == 0) return false;
+
             foreach (CustomItemDefinition definition in definitions)
             {
-                CustomItemRegistrationOutcome outcome = new CustomItemRegistrationOutcome { DefinitionId = definition.Id };
+                CustomItemRegistrationOutcome outcome = new CustomItemRegistrationOutcome { DefinitionId = definition == null ? string.Empty : definition.Id };
                 outcomes.Add(outcome);
 
                 CustomItemDefinitionRejectReason validation = CustomItemRegistry.Validate(definition, null);
                 bool definitionShapeValid = validation == CustomItemDefinitionRejectReason.None;
-
                 object existingEntry = definitionShapeValid ? TryGetExisting(itemDatabaseInstance, definition.Id) : null;
                 bool nativeEntryExists = existingEntry != null;
-                bool ownedByUs = nativeEntryExists &&
-                    (OwnedIds.Contains(definition.Id) || HasOwnershipMarker(existingEntry, definition.Id));
+                // Treat the explicit runtime marker on the actual live Item as ownership
+                // authority. A static id cache alone can outlive an ItemDatabase recreation and
+                // must never turn a foreign same-id entry into an assumed-owned object.
+                bool ownedByUs = nativeEntryExists && HasOwnershipMarker(existingEntry, definition.Id);
 
+                object baseItem = null;
+                string baseReason = string.Empty;
+                if (definitionShapeValid && !nativeEntryExists)
+                    baseItem = FindSafeBaseItem(itemDatabaseInstance, definition.VisualKind, out baseReason);
+
+                outcome.BaseItemName = baseItem != null ? ReadName(baseItem) : string.Empty;
+                outcome.BaseItemId = baseItem != null ? ReadId(baseItem) : string.Empty;
+                outcome.BaseSelectionReason = baseReason;
+
+                if (definitionShapeValid && definition.Id == CraftingExpandedItemIds.WildHerbId)
+                {
+                    LastBaseItemName = baseItem != null ? ReadName(baseItem) : (ownedByUs ? ReadName(existingEntry) : "(none found)");
+                    LastBaseItemId = baseItem != null ? ReadId(baseItem) : (ownedByUs ? ReadId(existingEntry) : string.Empty);
+                    LastBaseSelectionReason = ownedByUs ? "existing owned Wild Herb registration reused" : baseReason;
+                }
+
+                bool canCreate = definitionShapeValid && baseItem != null;
+                bool policyDefinitionReady = definitionShapeValid && (nativeEntryExists || canCreate);
                 CustomItemRegistrationState state = CustomItemRegistrationPolicy.Evaluate(
-                    definitionShapeValid && baseItem != null, nativeEntryExists, ownedByUs);
+                    policyDefinitionReady, nativeEntryExists, ownedByUs);
                 outcome.State = state;
 
                 if (state == CustomItemRegistrationState.Unavailable)
                 {
                     outcome.FailureReason = !definitionShapeValid
                         ? ("Definition invalid: " + validation)
-                        : "No safe base item found in live ItemDB to clone from.";
+                        : "No safe native base item found for visual kind " + definition.VisualKind + " (" + baseReason + ").";
                     continue;
                 }
                 if (state == CustomItemRegistrationState.Collision)
@@ -80,12 +120,11 @@ namespace ErenshorCraftingExpanded
                 }
                 if (ownedByUs)
                 {
-                    // Idempotent across repeated ItemDatabase.Start/registration attempts in the
-                    // same process. The Unity Object.name marker is runtime provenance only; the
-                    // user-facing ItemName remains unchanged. This does not claim arbitrary
-                    // late hot-load support after ItemDatabase.Start has already finished.
                     OwnedIds.Add(definition.Id);
                     ResolvedItemsById[definition.Id] = existingEntry;
+                    outcome.BaseItemName = ReadName(existingEntry);
+                    outcome.BaseItemId = ReadId(existingEntry);
+                    outcome.BaseSelectionReason = "existing owned registration reused";
                     continue;
                 }
 
@@ -120,6 +159,123 @@ namespace ErenshorCraftingExpanded
         internal static bool IsCustomItemAvailable(string id)
         {
             return OwnedIds.Contains(id);
+        }
+
+        // Historical/current project IL evidence establishes GameData.ItemDB as the live native
+        // ItemDatabase back-reference set at the start of ItemDatabase.Start(). Reflection keeps
+        // visibility assumptions out of the compile surface and enables safe late-plugin recovery
+        // when Lunaris loads this mod after Start() already ran. Read-only.
+        internal static object TryGetLiveItemDatabase()
+        {
+            try { return GetStaticField("GameData", "ItemDB"); }
+            catch { return null; }
+        }
+
+        internal enum InventoryOnlyGrantResult
+        {
+            Success = 0,
+            ItemUnavailable = 1,
+            InventoryUnavailable = 2,
+            NativeGrantUnavailable = 3,
+            InventoryRejected = 4,
+            Failed = 5
+        }
+
+        // Recovery grants deliberately never call ForceItemToInv. A replacement template must
+        // respect native inventory capacity: if the normal AddItemToInv path rejects it, the
+        // permanent recipe knowledge/entitlement remains and the player can retry after making
+        // room. The existing generic resource-grant path below retains its historical behavior.
+        internal static InventoryOnlyGrantResult GrantRegisteredItemToInventoryOnly(string id)
+        {
+            object item = TryResolveCustomItem(id);
+            if (item == null || !OwnedIds.Contains(id)) return InventoryOnlyGrantResult.ItemUnavailable;
+            try
+            {
+                object playerInv = GetStaticField("GameData", "PlayerInv");
+                if (playerInv == null) return InventoryOnlyGrantResult.InventoryUnavailable;
+                Type invType = playerInv.GetType();
+
+                MethodInfo addWithQty = FindMethod(invType, "AddItemToInv", item.GetType(), typeof(int));
+                if (addWithQty != null)
+                {
+                    object result = addWithQty.Invoke(playerInv, new object[] { item, 1 });
+                    if (!(result is bool)) return InventoryOnlyGrantResult.NativeGrantUnavailable;
+                    return (bool)result ? InventoryOnlyGrantResult.Success : InventoryOnlyGrantResult.InventoryRejected;
+                }
+
+                MethodInfo add = FindMethod(invType, "AddItemToInv", item.GetType());
+                if (add == null) return InventoryOnlyGrantResult.NativeGrantUnavailable;
+                object oneResult = add.Invoke(playerInv, new object[] { item });
+                if (!(oneResult is bool)) return InventoryOnlyGrantResult.NativeGrantUnavailable;
+                return (bool)oneResult ? InventoryOnlyGrantResult.Success : InventoryOnlyGrantResult.InventoryRejected;
+            }
+            catch { return InventoryOnlyGrantResult.Failed; }
+        }
+
+        // Foraging-specific strict grant. Exactly one native AddItemToInv overload is selected
+        // before invocation and is invoked at most once. There is deliberately no ForceItemToInv
+        // fallback and no second-overload retry after an invocation. If reflection/native code
+        // throws after Invoke begins, mutation is ambiguous and the node must fail closed.
+        internal static ForagingInventoryGrantResult GrantRegisteredItemForForaging(string id, int quantity, out bool nativeInvokeStarted)
+        {
+            nativeInvokeStarted = false;
+            object item = TryResolveCustomItem(id);
+            if (item == null || !OwnedIds.Contains(id) || quantity <= 0) return ForagingInventoryGrantResult.ItemUnavailable;
+
+            object playerInv;
+            try { playerInv = GetStaticField("GameData", "PlayerInv"); }
+            catch { return ForagingInventoryGrantResult.NativeGrantUnavailable; }
+            if (playerInv == null) return ForagingInventoryGrantResult.NativeGrantUnavailable;
+
+            Type invType = playerInv.GetType();
+            MethodInfo addWithQty = FindMethod(invType, "AddItemToInv", item.GetType(), typeof(int));
+            if (addWithQty != null)
+            {
+                try
+                {
+                    nativeInvokeStarted = true;
+                    object result = addWithQty.Invoke(playerInv, new object[] { item, quantity });
+                    if (!(result is bool)) return ForagingInventoryGrantResult.UnknownAfterInvoke;
+                    return (bool)result ? ForagingInventoryGrantResult.Success : ForagingInventoryGrantResult.InventoryRejected;
+                }
+                catch { return ForagingInventoryGrantResult.UnknownAfterInvoke; }
+            }
+
+            if (quantity != 1) return ForagingInventoryGrantResult.NativeGrantUnavailable;
+            MethodInfo add = FindMethod(invType, "AddItemToInv", item.GetType());
+            if (add == null) return ForagingInventoryGrantResult.NativeGrantUnavailable;
+            try
+            {
+                nativeInvokeStarted = true;
+                object result = add.Invoke(playerInv, new object[] { item });
+                if (!(result is bool)) return ForagingInventoryGrantResult.UnknownAfterInvoke;
+                return (bool)result ? ForagingInventoryGrantResult.Success : ForagingInventoryGrantResult.InventoryRejected;
+            }
+            catch { return ForagingInventoryGrantResult.UnknownAfterInvoke; }
+        }
+
+        // Applies only player-ownership presentation/safety fields to an already registered,
+        // explicitly mod-owned recipe-template Item. Recipe mutation/ingredients/rewards remain
+        // the native-recipe workstream's responsibility. Unique is intentionally not touched.
+        internal static bool TryApplyRecipeTemplateSafety(string id, string recipeDisplayName)
+        {
+            if (!CraftingExpandedItemIds.IsInRecipeTemplateRange(id)) return false;
+            object item = TryResolveCustomItem(id);
+            if (item == null || !OwnedIds.Contains(id) || !HasOwnershipMarker(item, id)) return false;
+            try
+            {
+                SetField(item, "ItemName", RecipeTemplateItemPolicy.FormatTemplateName(recipeDisplayName));
+                SetField(item, "ItemValue", RecipeTemplateItemPolicy.SafeVendorValue);
+                SetField(item, "PlayerCannotSell", RecipeTemplateItemPolicy.PlayerCannotSell);
+                SetField(item, "NoTradeNoDestroy", RecipeTemplateItemPolicy.NoTradeNoDestroy);
+
+                object value = GetRef(item.GetType(), item, "ItemValue");
+                return ReadName(item) == RecipeTemplateItemPolicy.FormatTemplateName(recipeDisplayName) &&
+                    GetBool(item.GetType(), item, "PlayerCannotSell") == true &&
+                    GetBool(item.GetType(), item, "NoTradeNoDestroy") == true &&
+                    value is int && (int)value == RecipeTemplateItemPolicy.SafeVendorValue;
+            }
+            catch { return false; }
         }
 
         internal static bool GrantRegisteredItem(string id, int quantity)
@@ -164,21 +320,140 @@ namespace ErenshorCraftingExpanded
             catch { return false; }
         }
 
-        private static object FindSafeBaseItem(object itemDatabaseInstance)
+        // Narrow internal primitives shared by the experimental recipe bridge. They reuse the
+        // same verified ItemDB/itemDict/ItemDBList transaction as custom materials instead of
+        // creating a second database mutation implementation.
+        internal static object TryGetLiveItem(object itemDatabaseInstance, string id)
+        {
+            if (itemDatabaseInstance == null || string.IsNullOrEmpty(id)) return null;
+            ResolveReflectionOnce(itemDatabaseInstance.GetType());
+            return _reflectionResolved ? TryGetExisting(itemDatabaseInstance, id) : null;
+        }
+
+        internal static bool HasOwnedMarker(object item, string id) { return HasOwnershipMarker(item, id); }
+
+        internal static void MarkOwned(object item, string id)
         {
             try
             {
-                IList itemDb = _itemDbField.GetValue(itemDatabaseInstance) as IList;
-                if (itemDb == null) return null;
-                foreach (object item in itemDb)
-                {
-                    if (item == null) continue;
-                    if (!IsSafeBaseCandidate(item)) continue;
-                    return item;
-                }
+                UnityEngine.Object unityItem = item as UnityEngine.Object;
+                if (unityItem != null) unityItem.name = OwnershipNamePrefix + id;
             }
             catch { }
-            return null;
+        }
+
+        internal static bool TryInsertOwnedItem(object itemDatabaseInstance, string id, object item, out object liveItem)
+        {
+            liveItem = null;
+            if (itemDatabaseInstance == null || item == null || string.IsNullOrEmpty(id)) return false;
+            ResolveReflectionOnce(itemDatabaseInstance.GetType());
+            if (!_reflectionResolved || !string.Equals(ReadId(item), id, StringComparison.Ordinal)) return false;
+
+            object existing = TryGetExisting(itemDatabaseInstance, id);
+            if (existing != null)
+            {
+                if (!HasOwnershipMarker(existing, id)) return false;
+                OwnedIds.Add(id);
+                ResolvedItemsById[id] = existing;
+                liveItem = existing;
+                return true;
+            }
+
+            MarkOwned(item, id);
+            if (!HasOwnershipMarker(item, id) || !InsertIntoDatabase(itemDatabaseInstance, item)) return false;
+            OwnedIds.Add(id);
+            ResolvedItemsById[id] = item;
+            liveItem = item;
+            return true;
+        }
+
+        internal static string ReadLiveId(object item) { return item == null ? string.Empty : ReadId(item); }
+        internal static string ReadLiveName(object item) { return item == null ? string.Empty : ReadName(item); }
+
+        // Physical recipe templates need a truthful inventory-full signal. Unlike the historically
+        // live-tested forage-material path above, this strict grant never calls ForceItemToInv.
+        // Knowledge can therefore remain permanent while a failed physical delivery becomes
+        // RestoreAvailable for an explicit later retry.
+        internal static bool GrantRegisteredItemStrict(string id, int quantity)
+        {
+            object item = TryResolveCustomItem(id);
+            if (item == null || quantity <= 0) return false;
+            try
+            {
+                object playerInv = GetStaticField("GameData", "PlayerInv");
+                if (playerInv == null) return false;
+                Type invType = playerInv.GetType();
+                MethodInfo addWithQty = FindMethod(invType, "AddItemToInv", item.GetType(), typeof(int));
+                if (addWithQty != null)
+                {
+                    object result = addWithQty.Invoke(playerInv, new object[] { item, quantity });
+                    if (result is bool && (bool)result) return true;
+                }
+                if (quantity != 1) return false;
+                MethodInfo add = FindMethod(invType, "AddItemToInv", item.GetType());
+                if (add == null) return false;
+                object oneResult = add.Invoke(playerInv, new object[] { item });
+                return oneResult is bool && (bool)oneResult;
+            }
+            catch { return false; }
+        }
+
+        private static object FindSafeBaseItem(object itemDatabaseInstance, CustomItemVisualKind visualKind, out string selectionReason)
+        {
+            selectionReason = string.Empty;
+            try
+            {
+                IList itemDb = _itemDbField.GetValue(itemDatabaseInstance) as IList;
+                if (itemDb == null)
+                {
+                    selectionReason = "live ItemDB unavailable";
+                    return null;
+                }
+
+                object best = null;
+                int bestScore = int.MinValue;
+                string bestName = string.Empty;
+                string bestId = string.Empty;
+
+                foreach (object item in itemDb)
+                {
+                    if (item == null || !IsSafeBaseCandidate(item)) continue;
+                    string name = ReadName(item);
+                    int score = OrganicItemBasePolicy.ScoreName(name, visualKind);
+                    if (score == int.MinValue) continue;
+
+                    string id = ReadId(item);
+                    bool better = score > bestScore;
+                    if (!better && score == bestScore)
+                    {
+                        int byName = string.Compare(name, bestName, StringComparison.OrdinalIgnoreCase);
+                        if (byName < 0 || (byName == 0 && string.Compare(id, bestId, StringComparison.Ordinal) < 0))
+                            better = true;
+                    }
+                    if (!better) continue;
+
+                    best = item;
+                    bestScore = score;
+                    bestName = name;
+                    bestId = id;
+                }
+
+                if (best == null)
+                {
+                    selectionReason = "no safe native Item template matched " +
+                        OrganicItemBasePolicy.EvidenceDescription(visualKind) +
+                        "; unrelated plant/food/geological fallback refused";
+                    return null;
+                }
+
+                selectionReason = "native visual template selected from live ItemDB kind=" + visualKind + " score=" + bestScore;
+                return best;
+            }
+            catch (Exception ex)
+            {
+                selectionReason = "base selection failed: " + ex.GetType().Name;
+                return null;
+            }
         }
 
         // Every field checked here is a confirmed real Item field (see
@@ -190,6 +465,11 @@ namespace ErenshorCraftingExpanded
                 GetBool(t, item, "Stackable") == true &&
                 IsGeneralSlot(t, item) &&
                 GetBool(t, item, "Unique") == false &&
+                GetBool(t, item, "Template") == false &&
+                GetBool(t, item, "FuelSource") == false &&
+                IsListFieldEmpty(t, item, "TemplateIngredients") &&
+                IsListFieldEmpty(t, item, "TemplateRewards") &&
+                GetRef(t, item, "ItemIcon") != null &&
                 GetRef(t, item, "TeachSpell") == null &&
                 GetRef(t, item, "TeachSkill") == null &&
                 GetRef(t, item, "ItemEffectOnClick") == null &&
@@ -231,6 +511,20 @@ namespace ErenshorCraftingExpanded
                 return f == null ? null : f.GetValue(instance);
             }
             catch { return null; }
+        }
+
+        private static bool IsListFieldEmpty(Type t, object instance, string name)
+        {
+            try
+            {
+                FieldInfo f = t.GetField(name, AllInstance);
+                if (f == null) return false;
+                object value = f.GetValue(instance);
+                if (value == null) return true;
+                IList list = value as IList;
+                return list != null && list.Count == 0;
+            }
+            catch { return false; }
         }
 
         private static void SetField(object instance, string name, object value)
@@ -280,6 +574,18 @@ namespace ErenshorCraftingExpanded
                 SetField(clone, "IsWand", false); SetField(clone, "IsBow", false);
                 SetField(clone, "Relic", false); SetField(clone, "RareItem", false);
                 SetField(clone, "Unique", false); SetField(clone, "SimPlayersCantGet", false);
+                SetField(clone, "Template", false); SetField(clone, "FuelSource", false);
+                if (!ReplaceWithEmptyList(clone, "TemplateIngredients") ||
+                    !ReplaceWithEmptyList(clone, "TemplateRewards") ||
+                    ReadId(clone) != definition.Id || ReadName(clone) != definition.Name ||
+                    GetBool(clone.GetType(), clone, "Template") != false ||
+                    GetBool(clone.GetType(), clone, "FuelSource") != false ||
+                    !IsListFieldEmpty(clone.GetType(), clone, "TemplateIngredients") ||
+                    !IsListFieldEmpty(clone.GetType(), clone, "TemplateRewards"))
+                {
+                    try { UnityEngine.Object.Destroy(clone); } catch { }
+                    return null;
+                }
 
                 return clone;
             }
@@ -296,6 +602,20 @@ namespace ErenshorCraftingExpanded
                 f.SetValue(clone, listInstance);
             }
             catch { }
+        }
+
+        private static bool ReplaceWithEmptyList(object clone, string fieldName)
+        {
+            try
+            {
+                FieldInfo field = clone.GetType().GetField(fieldName, AllInstance);
+                if (field == null) return false;
+                object empty = Activator.CreateInstance(field.FieldType);
+                field.SetValue(clone, empty);
+                IList list = field.GetValue(clone) as IList;
+                return list != null && list.Count == 0;
+            }
+            catch { return false; }
         }
 
         private static bool InsertIntoDatabase(object itemDatabaseInstance, object item)

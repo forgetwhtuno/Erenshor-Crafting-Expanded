@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 
 namespace ErenshorCraftingExpanded
 {
@@ -8,6 +9,52 @@ namespace ErenshorCraftingExpanded
         internal static bool ShouldShow(bool gameplayReady, bool hubUsable, bool bridgeRegistered, bool explicitlyVisibleWithHub)
         {
             return gameplayReady && (explicitlyVisibleWithHub || !hubUsable || !bridgeRegistered);
+        }
+    }
+
+    // The standalone launcher may honor the user's Show Launcher preference only while the
+    // retained Suite Hub is actually Ready and its player UI is built. A loaded Hub plugin is not
+    // enough: malformed/missing/unavailable presence fails safe to the recovery launcher.
+    // interactionValidated is diagnostic metadata and is deliberately not an access gate.
+    internal static class SuiteHubPresencePolicy
+    {
+        internal static bool IsUsable(string payload)
+        {
+            if (string.IsNullOrEmpty(payload) || payload.Length > 2048) return false;
+            string protocol = null;
+            string module = null;
+            string status = null;
+            string uiAvailable = null;
+            string[] fields = payload.Split('&');
+            for (int i = 0; i < fields.Length; i++)
+            {
+                int equals = fields[i].IndexOf('=');
+                if (equals <= 0) return false;
+                string key = fields[i].Substring(0, equals);
+                string value = fields[i].Substring(equals + 1);
+                if (key == "protocol") { if (protocol != null) return false; protocol = value; }
+                else if (key == "module") { if (module != null) return false; module = value; }
+                else if (key == "status") { if (status != null) return false; status = value; }
+                else if (key == "uiAvailable") { if (uiAvailable != null) return false; uiAvailable = value; }
+            }
+            return string.Equals(protocol, "1", StringComparison.Ordinal)
+                && string.Equals(module, "suitehub", StringComparison.Ordinal)
+                && string.Equals(status, "Ready", StringComparison.Ordinal)
+                && string.Equals(uiAvailable, "true", StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    internal static class SuiteUiStatePolicy
+    {
+        internal static string Build(string moduleId, bool open, int sortOrder, double activated)
+        {
+            if (moduleId == null) moduleId = string.Empty;
+            if (double.IsNaN(activated) || double.IsInfinity(activated) || activated < 0d) activated = 0d;
+            return "protocol=1&module=" + Uri.EscapeDataString(moduleId) +
+                "&open=" + (open ? "true" : "false") +
+                "&closeable=" + (open ? "true" : "false") +
+                "&sortOrder=" + sortOrder.ToString(CultureInfo.InvariantCulture) +
+                "&activated=" + activated.ToString("0.###", CultureInfo.InvariantCulture);
         }
     }
 
@@ -114,6 +161,11 @@ namespace ErenshorCraftingExpanded
             if (!LauncherVisibilityPolicy.ShouldShow(true, true, false, false)) return "FAIL launcher hidden when module bridge unavailable";
             if (LauncherVisibilityPolicy.ShouldShow(true, true, true, false)) return "FAIL launcher visible with usable Hub when setting off";
             if (!LauncherVisibilityPolicy.ShouldShow(true, true, true, true)) return "FAIL explicit launcher setting ignored";
+            if (!SuiteHubPresencePolicy.IsUsable("protocol=1&module=suitehub&status=Ready&uiAvailable=true&interactionValidated=false&quickClose=0")) return "FAIL usable Hub presence rejected";
+            if (SuiteHubPresencePolicy.IsUsable("protocol=1&module=suitehub&status=Ready&uiAvailable=false")) return "FAIL unavailable Hub UI accepted";
+            if (SuiteHubPresencePolicy.IsUsable("protocol=1&module=suitehub&status=NotReady&uiAvailable=true")) return "FAIL not-ready Hub accepted";
+            if (SuiteHubPresencePolicy.IsUsable("protocol=1&module=suitehub&status=Ready&uiAvailable=true&status=Ready")) return "FAIL duplicate Hub status accepted";
+            if (SuiteHubPresencePolicy.IsUsable("protocol=1&module=suitehub&status=Ready&uiAvailable=true&uiAvailable=true")) return "FAIL duplicate Hub availability accepted";
             if (InterpretStoredAxis(float.NaN) != Unset) return "FAIL NaN storage accepted";
             if (InterpretStoredAxis(float.PositiveInfinity) != Unset) return "FAIL infinite storage accepted";
             if (InterpretStoredAxis(500f) != Unset) return "FAIL legacy pixel storage accepted as normalized";
@@ -131,6 +183,14 @@ namespace ErenshorCraftingExpanded
             if (SuiteUiControlPolicy.ParsePanelAction("unknown") != SuitePanelAction.Unknown) return "FAIL unknown action route";
             if (SuiteUiControlPolicy.BoundStatus(new string('x', 300)).Length != 240) return "FAIL status bound";
             if (SuiteUiControlPolicy.BoundStatus("a\nb").IndexOf('\n') >= 0) return "FAIL status newline";
+            string uiState = SuiteUiStatePolicy.Build("crafting", true, 523, 12.5d);
+            if (uiState.IndexOf("module=crafting", StringComparison.Ordinal) < 0) return "FAIL ui.state module";
+            if (uiState.IndexOf("open=true&closeable=true", StringComparison.Ordinal) < 0) return "FAIL ui.state closeable";
+            if (uiState.IndexOf("sortOrder=523", StringComparison.Ordinal) < 0) return "FAIL ui.state sort order";
+            if (uiState.IndexOf("activated=12.5", StringComparison.Ordinal) < 0) return "FAIL ui.state activation";
+            string closedState = SuiteUiStatePolicy.Build("crafting", false, 523, double.NaN);
+            if (closedState.IndexOf("open=false&closeable=false", StringComparison.Ordinal) < 0) return "FAIL closed ui.state";
+            if (closedState.IndexOf("activated=0", StringComparison.Ordinal) < 0) return "FAIL invalid activation clamp";
             SuiteUiGestureState gesture = new SuiteUiGestureState();
             if (gesture.IsActive) return "FAIL gesture starts active";
             gesture.Begin();

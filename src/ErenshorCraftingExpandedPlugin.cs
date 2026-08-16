@@ -8,26 +8,34 @@ using UnityEngine.SceneManagement;
 
 namespace ErenshorCraftingExpanded
 {
-    [LunarisPlugin("forgetwhtuno.erenshor.craftingexpanded", "0.2.0", "forgetwhtuno",
+    [LunarisPlugin("forgetwhtuno.erenshor.craftingexpanded", "0.2.3", "forgetwhtuno",
         "Horizontal-progression expansion to Erenshor's native crafting: forge quality-of-life, Smithing progression, an experimental commission PoC, and a mod-owned Foraging system.")]
     [LunarisPermission(LunarisPermission.FileAccess | LunarisPermission.Reflection | LunarisPermission.Harmony)]
     public sealed class ErenshorCraftingExpandedPlugin : LunarisPlugin
     {
-        internal const string Version = "0.2.0";
+        internal const string Version = "0.2.3";
         private Harmony _harmony;
         private CraftingExpandedSettings _settings;
         private CraftingSuiteAuraProvider _auraProvider;
         private bool _loggedStartupSummary;
         private bool _runtimeReady;
+        private float _nextLateItemRegistryProbe;
+        private float _nextExperimentalRecipeProbe;
 
         private void Awake()
         {
             ErenshorCraftingExpandedPluginHolder.Instance = this;
+            CraftingExpandedItems.BeginPluginSession();
             _settings = new CraftingExpandedSettings();
             Config.Register(ref _settings);
             string dataDir = System.IO.Path.Combine(System.IO.Path.Combine(AppContext.BaseDirectory, "plugins", "config"), "ErenshorCraftingExpanded");
             CraftingController.Initialize(_settings, dataDir);
             _harmony = new Harmony("forgetwhtuno.erenshor.craftingexpanded");
+
+            // Subscribe to the Hub's fail-safe presence endpoint before UI ticks begin. The
+            // standalone launcher remains visible whenever this optional subscriber/provider is
+            // missing, malformed, or reports that the retained Hub UI is unavailable.
+            SuiteUiPolicy.InitializeHubPresence(this);
 
             // Optional Suite Hub transport adapter. Never assumed present; registration failure
             // must never block normal standalone crafting/foraging.
@@ -45,6 +53,11 @@ namespace ErenshorCraftingExpanded
             try
             {
                 _harmony.PatchAll();
+                string cameraCompatibility;
+                if (CraftingCameraUiOwnershipPatch.TryInstall(_harmony, out cameraCompatibility))
+                    Logging.LogInfo("Crafting UI camera containment: " + cameraCompatibility + ".");
+                else
+                    Logging.LogWarning("Crafting UI camera containment not installed: " + cameraCompatibility + ". Native camera behavior retained.");
                 _runtimeReady = true;
                 Logging.LogInfo("Erenshor Crafting Expanded " + Version + ": Harmony patches applied OK (" + _harmony.GetPatchedMethods().Count() + " methods patched).");
             }
@@ -67,6 +80,19 @@ namespace ErenshorCraftingExpanded
         {
             try
             {
+                if (!CraftingExpandedItems.AttemptedThisSession && Time.unscaledTime >= _nextLateItemRegistryProbe)
+                {
+                    _nextLateItemRegistryProbe = Time.unscaledTime + 1f;
+                    CraftingExpandedItems.TryLateRegisterFromLiveDatabase();
+                }
+                if (CraftingExpandedItems.AttemptedThisSession &&
+                    CraftingConfig.EnableMod != null && CraftingConfig.EnableMod.Value &&
+                    CraftingConfig.ExperimentalNativeRecipeRegistration != null && CraftingConfig.ExperimentalNativeRecipeRegistration.Value &&
+                    ExperimentalNativeRecipeRegistry.CanAutoRetry && Time.unscaledTime >= _nextExperimentalRecipeProbe)
+                {
+                    _nextExperimentalRecipeProbe = Time.unscaledTime + 2f;
+                    ExperimentalNativeRecipeRegistry.TryRegisterFromLiveDatabase();
+                }
                 if (_runtimeReady) CraftingController.Tick();
                 // The retained control UI remains available even when the gameplay patch set
                 // fails closed, so the user can still inspect status/re-enable settings and is
@@ -75,6 +101,7 @@ namespace ErenshorCraftingExpanded
             }
             catch (Exception ex)
             {
+                try { ForageNodeController.RuntimeExceptionCleanup(); } catch { }
                 SuiteDragHandler.ForceReleaseIfOwned();
                 Logging.LogError("Crafting update failed: " + ex);
             }
@@ -85,24 +112,43 @@ namespace ErenshorCraftingExpanded
             }
         }
 
-        // Logged exactly once, as soon as the ItemDatabase.Start postfix has run (see
-        // Items/CraftingExpandedItems.cs) - everything a tester needs to confirm at boot without
-        // spamming LogOutput.log on every frame.
+        // Logged exactly once, as soon as registration has reached a populated live ItemDatabase
+        // (normally the ItemDatabase.Start postfix, or the bounded late-load recovery path) -
+        // enough boot evidence for a tester without per-frame log spam.
         private void LogStartupSummary()
         {
             Logging.LogInfo("Erenshor Crafting Expanded " + Version + " startup summary:");
-            Logging.LogInfo("  Foraging enabled=" + ForagingConfig.EnableForaging.Value + " pocNodeEnabled=" + ForagingConfig.EnablePoCNode.Value);
+            string forageScene = ForageNodeController.SafeSceneName();
+            Logging.LogInfo("  Foraging enabled=" + ForagingConfig.EnableForaging.Value +
+                " autoPlacement=" + ForageNodeController.IsAutoPlacementEnabledForScene(forageScene) +
+                " scene=" + forageScene +
+                " spawned=" + ForageNodeController.SpawnedCount +
+                " available=" + ForageNodeController.AvailableCount() +
+                " depleted=" + ForageNodeController.DepletedCount());
             Logging.LogInfo("  Wild Herb id=" + CraftingExpandedItemIds.WildHerbId +
                 " state=" + CraftingExpandedItems.WildHerbState() +
                 " baseItem=" + (string.IsNullOrEmpty(GameItemRegistryApi.LastBaseItemName) ? "(none found)" : GameItemRegistryApi.LastBaseItemName) +
-                " baseItemId=" + (string.IsNullOrEmpty(GameItemRegistryApi.LastBaseItemId) ? "(unknown)" : GameItemRegistryApi.LastBaseItemId));
+                " baseItemId=" + (string.IsNullOrEmpty(GameItemRegistryApi.LastBaseItemId) ? "(unknown)" : GameItemRegistryApi.LastBaseItemId) +
+                " baseVisual=" + (string.IsNullOrEmpty(GameItemRegistryApi.LastBaseSelectionReason) ? "(not yet resolved)" : GameItemRegistryApi.LastBaseSelectionReason));
+            CustomItemRegistrationOutcome fungus = CraftingExpandedItems.Outcome(CraftingExpandedItemIds.CaveMushroomId);
+            Logging.LogInfo("  Cave Mushroom id=" + CraftingExpandedItemIds.CaveMushroomId +
+                " state=" + CraftingExpandedItems.State(CraftingExpandedItemIds.CaveMushroomId) +
+                " experimentalCovered=" + (ForagingConfig.ExperimentalCoveredResources != null && ForagingConfig.ExperimentalCoveredResources.Value ? "on" : "off") +
+                " baseItem=" + (fungus == null || string.IsNullOrEmpty(fungus.BaseItemName) ? "(none found)" : fungus.BaseItemName) +
+                " baseVisual=" + (fungus == null || string.IsNullOrEmpty(fungus.BaseSelectionReason) ? "(not yet resolved)" : fungus.BaseSelectionReason));
+            Logging.LogInfo("  Native crafting probe: " + NativeCraftingRuntimeProbe.Describe());
+            Logging.LogInfo("  Native recipe experiment: " + ExperimentalNativeRecipeRegistry.Describe());
             string conflict = CraftingExpandedItems.ConflictingItemName();
             string failure = CraftingExpandedItems.LastFailureReason();
             if (!string.IsNullOrEmpty(conflict)) Logging.LogWarning("  Wild Herb id collision with existing item: " + conflict);
             if (!string.IsNullOrEmpty(failure)) Logging.LogWarning("  Wild Herb registration issue: " + failure);
+            string fungusConflict = CraftingExpandedItems.ConflictingItemName(CraftingExpandedItemIds.CaveMushroomId);
+            string fungusFailure = CraftingExpandedItems.FailureReason(CraftingExpandedItemIds.CaveMushroomId);
+            if (!string.IsNullOrEmpty(fungusConflict)) Logging.LogWarning("  Cave Mushroom id collision with existing item: " + fungusConflict);
+            if (!string.IsNullOrEmpty(fungusFailure)) Logging.LogWarning("  Cave Mushroom registration issue: " + fungusFailure);
         }
-        private void OnSceneLoaded(Scene scene, LoadSceneMode mode) { CraftingController.SceneTransition(); }
-        private void OnSceneUnloaded(Scene scene) { CraftingController.SceneTransition(); }
+        private void OnSceneLoaded(Scene scene, LoadSceneMode mode) { SuiteDragHandler.ForceReleaseIfOwned(); CraftingController.SceneTransition(); }
+        private void OnSceneUnloaded(Scene scene) { SuiteDragHandler.ForceReleaseIfOwned(); CraftingController.SceneTransition(); }
 
         private void OnDestroy()
         {
@@ -144,6 +190,73 @@ namespace ErenshorCraftingExpanded
                 return true;
             }
 
+            if (command.Equals("/craftdiag givemushroom", StringComparison.OrdinalIgnoreCase))
+            {
+                ClearChatInput(typeText);
+                CraftingDiagnostics.ReportGiveCaveMushroom();
+                return true;
+            }
+
+            if (command.Equals("/craftdiag recipe status", StringComparison.OrdinalIgnoreCase))
+            {
+                ClearChatInput(typeText);
+                CraftingDiagnostics.ReportRecipeExperimentStatus();
+                return true;
+            }
+            if (command.Equals("/craftdiag recipe candidates", StringComparison.OrdinalIgnoreCase))
+            {
+                ClearChatInput(typeText);
+                CraftingDiagnostics.ReportRecipeCandidates();
+                return true;
+            }
+            if (command.Equals("/craftdiag recipe trial register", StringComparison.OrdinalIgnoreCase))
+            {
+                ClearChatInput(typeText);
+                CraftingDiagnostics.ReportRecipeTrialRegister();
+                return true;
+            }
+            if (command.Equals("/craftdiag recipe trial grant", StringComparison.OrdinalIgnoreCase))
+            {
+                ClearChatInput(typeText);
+                CraftingDiagnostics.ReportRecipeTrialGrant();
+                return true;
+            }
+
+            // Development-only auto-placement trial controls. These are intentionally commands
+            // rather than Suite Hub settings: the normal Crafting Aura surface exposes only
+            // player-facing settings and deliberately omits developer probes/debug controls.
+            if (command.Equals("/craftdiag forage trial on", StringComparison.OrdinalIgnoreCase))
+            {
+                ClearChatInput(typeText);
+                ForagingConfig.EnablePoCNode.Value = true;
+                ForagingConfig.AllowDebugPlaceholderVisual.Value = true;
+                try { Config.Save(); } catch { }
+                CraftingController.SceneTransition();
+                try { UpdateSocialLog.LogAdd("[Crafting] Legacy forage survey candidate ON. Normal Wild Herb auto-placement is independent and follows EnableForaging.", "yellow"); } catch { }
+                return true;
+            }
+            if (command.Equals("/craftdiag forage trial off", StringComparison.OrdinalIgnoreCase))
+            {
+                ClearChatInput(typeText);
+                ForagingConfig.EnablePoCNode.Value = false;
+                ForagingConfig.AllowDebugPlaceholderVisual.Value = false;
+                try { Config.Save(); } catch { }
+                CraftingController.SceneTransition();
+                try { UpdateSocialLog.LogAdd("[Crafting] Legacy forage survey candidate OFF. Normal Wild Herb auto-placement remains controlled by EnableForaging.", "yellow"); } catch { }
+                return true;
+            }
+            if (command.Equals("/craftdiag forage trial status", StringComparison.OrdinalIgnoreCase) ||
+                command.Equals("/craftdiag forage trial", StringComparison.OrdinalIgnoreCase))
+            {
+                ClearChatInput(typeText);
+                string scene = ForageNodeController.SafeSceneName();
+                string state = "AutoPlacement=" + (ForageNodeController.IsAutoPlacementEnabledForScene(scene) ? "ON" : "OFF") +
+                    " LegacyPoCNode=" + (ForagingConfig.EnablePoCNode.Value ? "ON" : "OFF") +
+                    " DebugPlaceholder=" + (ForagingConfig.AllowDebugPlaceholderVisual.Value ? "ON" : "OFF");
+                try { UpdateSocialLog.LogAdd("[Crafting] Forage trial: " + state +
+                    " | commands: /craftdiag forage trial on|off|status", "yellow"); } catch { }
+                return true;
+            }
             // Development-only asset survey subcommands - see docs/FORAGING_ASSET_SURVEY.md.
             // Not a general world-editing console: these only ever report read-only information
             // about the player's transform and nearby renderers, never modify game state.

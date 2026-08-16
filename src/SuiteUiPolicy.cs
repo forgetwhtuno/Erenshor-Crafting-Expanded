@@ -1,5 +1,6 @@
 using System;
 using Lunaris;
+using Lunaris.IPC;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
@@ -8,7 +9,7 @@ namespace ErenshorCraftingExpanded
     /// <summary>
     /// Standalone UI readiness/presence policy shared in shape across the independent suite mods.
     /// It deliberately has no compile-time dependency on Suite Hub and uses only native game
-    /// state already proven by the current suite plus a live LunarisPlugin component scan.
+    /// state already proven by the current suite plus the optional Suite Hub Aura presence contract.
     ///
     /// Canonical acquisition policy (Erenshor-Three-Audit-Integration-Handoff,
     /// CONTRACT_RECONCILIATION.md "Readiness contract"): fail closed during character
@@ -21,7 +22,7 @@ namespace ErenshorCraftingExpanded
     {
         private const float StableReadySeconds = 1.0f;
         private const float HubProbeSeconds = 1.0f;
-        private const string HubPluginTypeName = "ErenshorSuiteHub.ErenshorSuiteHubPlugin";
+        private const string HubPresenceEndpoint = "forgetwhtuno.erenshor.suitehub.v1.describe";
 
         private static bool _acquired;
         private static bool _canMoveSeen;
@@ -29,6 +30,7 @@ namespace ErenshorCraftingExpanded
         private static int _readySceneHandle = int.MinValue;
         private static float _nextHubProbe;
         private static bool _hubAvailable;
+        private static IAuraSubscriber<string> _hubPresence;
 
         internal static bool IsGameplayReady()
         {
@@ -80,6 +82,16 @@ namespace ErenshorCraftingExpanded
                 IsGameplayReady(), IsHubAvailable(), bridgeRegistered, explicitlyVisibleWithHub);
         }
 
+        internal static void InitializeHubPresence(LunarisPlugin owner)
+        {
+            _hubPresence = null;
+            _hubAvailable = false;
+            _nextHubProbe = 0f;
+            if (owner == null) return;
+            try { _hubPresence = owner.IPCAuraSubscriber<string>(HubPresenceEndpoint); }
+            catch { _hubPresence = null; }
+        }
+
         internal static bool IsHubAvailable()
         {
             if (Time.unscaledTime < _nextHubProbe) return _hubAvailable;
@@ -87,22 +99,13 @@ namespace ErenshorCraftingExpanded
             _hubAvailable = false;
             try
             {
-                LunarisPlugin[] plugins = UnityEngine.Object.FindObjectsOfType<LunarisPlugin>();
-                for (int i = 0; i < plugins.Length; i++)
-                {
-                    LunarisPlugin plugin = plugins[i];
-                    if (plugin == null) continue;
-                    Type type = plugin.GetType();
-                    if (type != null && string.Equals(type.FullName, HubPluginTypeName, StringComparison.Ordinal))
-                    {
-                        _hubAvailable = true;
-                        break;
-                    }
-                }
+                if (_hubPresence == null || !_hubPresence.HasFunction) return false;
+                _hubAvailable = SuiteHubPresencePolicy.IsUsable(_hubPresence.InvokeFunc());
             }
             catch
             {
-                // Presence detection is optional. Failure must never hide standalone controls.
+                // Presence is optional. Any transport/provider failure must keep the recovery
+                // launcher visible rather than strand the player without a UI entry point.
                 _hubAvailable = false;
             }
             return _hubAvailable;
@@ -113,6 +116,7 @@ namespace ErenshorCraftingExpanded
             ResetAcquisition();
             _nextHubProbe = 0f;
             _hubAvailable = false;
+            _hubPresence = null;
         }
 
         private static void ResetAcquisition()

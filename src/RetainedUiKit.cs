@@ -271,6 +271,153 @@ namespace ErenshorCraftingExpanded
         }
     }
 
+    // Shared ownership for Crafting-owned retained drag/resize gestures. The native flag value
+    // present before the first Crafting owner is restored when the last owner releases; this avoids
+    // clearing ownership established by vanilla or another mod. While Crafting owns the gesture the
+    // flag is monotonically reasserted because camera input is evaluated every frame.
+    internal static class CraftingUiPointerOwnership
+    {
+        private const string GlobalOwnersKey = "forgetwhtuno.erenshor.ui.drag.owners.v1";
+        private const string GlobalBaselineKey = "forgetwhtuno.erenshor.ui.drag.nativeBaseline.v1";
+        private const string GlobalBaselineCapturedKey = "forgetwhtuno.erenshor.ui.drag.nativeBaselineCaptured.v1";
+        private const string PluginOwnerKey = "forgetwhtuno.erenshor.crafting";
+
+        private static readonly HashSet<object> Owners = new HashSet<object>();
+        private static bool _localFallbackBaseline;
+        private static bool _localFallbackCaptured;
+        private static bool _usingGlobalCoordination;
+
+        internal static bool HasOwners { get { return Owners.Count > 0; } }
+
+        internal static void Acquire(object owner)
+        {
+            if (owner == null || Owners.Contains(owner)) return;
+            bool firstLocalOwner = Owners.Count == 0;
+            Owners.Add(owner);
+            if (firstLocalOwner) AcquireProcessOwner();
+            Reassert();
+        }
+
+        internal static void Reassert()
+        {
+            if (Owners.Count == 0) return;
+            try { if (!GameData.DraggingUIElement) GameData.DraggingUIElement = true; } catch { }
+        }
+
+        internal static void Release(object owner)
+        {
+            if (owner == null || !Owners.Remove(owner)) return;
+            if (Owners.Count == 0) ReleaseProcessOwner();
+            else Reassert();
+        }
+
+        internal static void ForceRestoreIfEmpty()
+        {
+            if (Owners.Count == 0) ReleaseProcessOwner();
+        }
+
+        private static void AcquireProcessOwner()
+        {
+            HashSet<string> processOwners;
+            if (TryGetProcessOwners(out processOwners))
+            {
+                lock (processOwners)
+                {
+                    bool firstProcessOwner = processOwners.Count == 0;
+                    if (firstProcessOwner)
+                    {
+                        bool baseline = false;
+                        try { baseline = GameData.DraggingUIElement; } catch { }
+                        AppDomain.CurrentDomain.SetData(GlobalBaselineKey, baseline);
+                        AppDomain.CurrentDomain.SetData(GlobalBaselineCapturedKey, true);
+                    }
+                    processOwners.Add(PluginOwnerKey);
+                    _usingGlobalCoordination = true;
+                    try { GameData.DraggingUIElement = true; } catch { }
+                }
+                return;
+            }
+
+            // A malformed process-local coordination slot is safer to leave untouched than to
+            // replace behind another plugin. Fall back to restoring only the native value that
+            // Crafting observed before its own first gesture.
+            try { _localFallbackBaseline = GameData.DraggingUIElement; }
+            catch { _localFallbackBaseline = false; }
+            _localFallbackCaptured = true;
+            _usingGlobalCoordination = false;
+            try { GameData.DraggingUIElement = true; } catch { }
+        }
+
+        private static void ReleaseProcessOwner()
+        {
+            if (_usingGlobalCoordination)
+            {
+                HashSet<string> processOwners;
+                if (TryGetExistingProcessOwners(out processOwners))
+                {
+                    lock (processOwners)
+                    {
+                        processOwners.Remove(PluginOwnerKey);
+                        if (processOwners.Count > 0)
+                        {
+                            try { GameData.DraggingUIElement = true; } catch { }
+                        }
+                        else
+                        {
+                            object captured = AppDomain.CurrentDomain.GetData(GlobalBaselineCapturedKey);
+                            bool shouldRestore = captured is bool && (bool)captured;
+                            object baseline = AppDomain.CurrentDomain.GetData(GlobalBaselineKey);
+                            bool value = baseline is bool && (bool)baseline;
+                            if (shouldRestore)
+                            {
+                                try { GameData.DraggingUIElement = value; } catch { }
+                            }
+                            AppDomain.CurrentDomain.SetData(GlobalBaselineCapturedKey, false);
+                            AppDomain.CurrentDomain.SetData(GlobalBaselineKey, false);
+                        }
+                    }
+                }
+                _usingGlobalCoordination = false;
+            }
+
+            if (_localFallbackCaptured)
+            {
+                try { GameData.DraggingUIElement = _localFallbackBaseline; } catch { }
+                _localFallbackBaseline = false;
+                _localFallbackCaptured = false;
+            }
+        }
+
+        private static bool TryGetProcessOwners(out HashSet<string> owners)
+        {
+            owners = null;
+            try
+            {
+                object existing = AppDomain.CurrentDomain.GetData(GlobalOwnersKey);
+                if (existing == null)
+                {
+                    owners = new HashSet<string>(StringComparer.Ordinal);
+                    AppDomain.CurrentDomain.SetData(GlobalOwnersKey, owners);
+                    return true;
+                }
+                owners = existing as HashSet<string>;
+                return owners != null;
+            }
+            catch { owners = null; return false; }
+        }
+
+        private static bool TryGetExistingProcessOwners(out HashSet<string> owners)
+        {
+            owners = null;
+            try
+            {
+                owners = AppDomain.CurrentDomain.GetData(GlobalOwnersKey) as HashSet<string>;
+                return owners != null;
+            }
+            catch { return false; }
+        }
+    }
+
     internal sealed class SuiteDragHandler : MonoBehaviour,
         IPointerDownHandler, IBeginDragHandler, IDragHandler, IEndDragHandler, IPointerUpHandler
     {
@@ -282,42 +429,41 @@ namespace ErenshorCraftingExpanded
         private RectTransform _parentRect;
         private Vector2 _startPointer;
         private Vector2 _startPosition;
-        private readonly SuiteUiGestureState _gesture = new SuiteUiGestureState();
-        private bool _owning;
+        private readonly CraftingPointerOwnershipState _gesture = new CraftingPointerOwnershipState();
 
-        public void OnPointerDown(PointerEventData eventData) { }
+        public void OnPointerDown(PointerEventData eventData)
+        {
+            if (eventData == null || eventData.button != PointerEventData.InputButton.Left) return;
+            Acquire();
+        }
 
         public void OnBeginDrag(PointerEventData eventData)
         {
+            if (eventData == null || eventData.button != PointerEventData.InputButton.Left) return;
             try
             {
                 if (Target == null) Target = GetComponent<RectTransform>();
-                if (Target == null) return;
+                if (Target == null) { EndDrag(false); return; }
+                Acquire();
+                _gesture.BeginDrag();
                 _parentRect = Target.parent as RectTransform;
-                if (_parentRect == null) return;
+                if (_parentRect == null) { EndDrag(false); return; }
                 Vector2 local;
-                if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(_parentRect, eventData.position, eventData.pressEventCamera, out local)) return;
+                if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(_parentRect, eventData.position, eventData.pressEventCamera, out local))
+                { EndDrag(false); return; }
                 _startPointer = local;
                 _startPosition = Target.anchoredPosition;
-                _gesture.Begin();
-                if (!_owning)
-                {
-                    _owning = true;
-                    _owners.Add(this);
-                }
-                GameData.DraggingUIElement = true;
+                CraftingUiPointerOwnership.Reassert();
             }
-            catch (Exception)
-            {
-                EndDrag(false);
-            }
+            catch { EndDrag(false); }
         }
 
         public void OnDrag(PointerEventData eventData)
         {
-            if (!_gesture.IsActive || Target == null || _parentRect == null) return;
+            if (!_gesture.IsDragging || eventData == null || Target == null || _parentRect == null) return;
             try
             {
+                CraftingUiPointerOwnership.Reassert();
                 Vector2 local;
                 if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(_parentRect, eventData.position, eventData.pressEventCamera, out local)) return;
                 Vector2 next = _startPosition + (local - _startPointer);
@@ -327,41 +473,55 @@ namespace ErenshorCraftingExpanded
                 next.y = Mathf.Clamp(next.y, 0f, Mathf.Max(0f, pr.height - tr.height));
                 Target.anchoredPosition = next;
             }
-            catch (Exception)
-            {
-                EndDrag(false);
-            }
+            catch { EndDrag(false); }
         }
 
-        public void OnEndDrag(PointerEventData eventData) { EndDrag(true); }
-        public void OnPointerUp(PointerEventData eventData) { EndDrag(false); }
-        private void OnDisable() { EndDrag(true); }
-        private void OnDestroy() { EndDrag(true); }
+        private void Update()
+        {
+            if (!_gesture.OwnsPointer) return;
+            CraftingUiPointerOwnership.Reassert();
+            try { if (!Input.GetMouseButton(0)) EndDrag(false); } catch { }
+        }
+
+        private void OnApplicationFocus(bool focused) { if (!focused) EndDrag(false); }
+        private void OnApplicationPause(bool paused) { if (paused) EndDrag(false); }
+        public void OnEndDrag(PointerEventData eventData) { if (eventData == null || eventData.button == PointerEventData.InputButton.Left) EndDrag(true); }
+        public void OnPointerUp(PointerEventData eventData) { if (eventData == null || eventData.button == PointerEventData.InputButton.Left) EndDrag(false); }
+        private void OnDisable() { EndDrag(false); }
+        private void OnDestroy() { EndDrag(false); }
+
+        private void Acquire()
+        {
+            if (!_gesture.PointerDown(true)) return;
+            _owners.Add(this);
+            CraftingUiPointerOwnership.Acquire(this);
+        }
 
         private void EndDrag(bool notify)
         {
-            bool wasDragging = _gesture.End();
-            Release();
-            if (notify && wasDragging && OnDragCompleted != null)
+            bool completed = _gesture.IsDragging;
+            if (_gesture.Release())
             {
-                try { OnDragCompleted(); } catch (Exception) { }
+                _owners.Remove(this);
+                CraftingUiPointerOwnership.Release(this);
+            }
+            _parentRect = null;
+            if (notify && completed && OnDragCompleted != null)
+            {
+                try { OnDragCompleted(); } catch { }
             }
         }
 
-        private void Release()
+        private void ForceReleaseLocal()
         {
-            if (!_owning) return;
-            _owning = false;
+            _gesture.Release();
             _owners.Remove(this);
-            if (_owners.Count == 0 && !SuiteResizeHandler.HasOwners)
-            {
-                try { GameData.DraggingUIElement = false; } catch (Exception) { }
-            }
+            CraftingUiPointerOwnership.Release(this);
+            _parentRect = null;
         }
 
         internal static void ForceReleaseIfOwned()
         {
-            bool ownedByThisMod = _owners.Count > 0 || SuiteResizeHandler.HasOwners;
             if (_owners.Count > 0)
             {
                 SuiteDragHandler[] owners = new SuiteDragHandler[_owners.Count];
@@ -369,18 +529,13 @@ namespace ErenshorCraftingExpanded
                 for (int i = 0; i < owners.Length; i++)
                 {
                     SuiteDragHandler owner = owners[i];
-                    if (owner == null) continue;
-                    owner._gesture.ForceRelease();
-                    owner._owning = false;
-                    owner._parentRect = null;
+                    if (owner != null) owner.ForceReleaseLocal();
+                    else CraftingUiPointerOwnership.Release((object)owner);
                 }
                 _owners.Clear();
             }
             SuiteResizeHandler.ForceReleaseIfOwned();
-            if (ownedByThisMod)
-            {
-                try { GameData.DraggingUIElement = false; } catch (Exception) { }
-            }
+            CraftingUiPointerOwnership.ForceRestoreIfEmpty();
         }
     }
 
@@ -396,41 +551,40 @@ namespace ErenshorCraftingExpanded
         private RectTransform _parentRect;
         private Vector2 _startPointer;
         private Vector2 _startSize;
-        private readonly SuiteUiGestureState _gesture = new SuiteUiGestureState();
-        private bool _owning;
+        private readonly CraftingPointerOwnershipState _gesture = new CraftingPointerOwnershipState();
 
-        public void OnPointerDown(PointerEventData eventData) { }
+        public void OnPointerDown(PointerEventData eventData)
+        {
+            if (eventData == null || eventData.button != PointerEventData.InputButton.Left) return;
+            Acquire();
+        }
 
         public void OnBeginDrag(PointerEventData eventData)
         {
+            if (eventData == null || eventData.button != PointerEventData.InputButton.Left) return;
             try
             {
-                if (Target == null) return;
+                if (Target == null) { EndResize(false); return; }
+                Acquire();
+                _gesture.BeginDrag();
                 _parentRect = Target.parent as RectTransform;
-                if (_parentRect == null) return;
+                if (_parentRect == null) { EndResize(false); return; }
                 Vector2 local;
-                if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(_parentRect, eventData.position, eventData.pressEventCamera, out local)) return;
+                if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(_parentRect, eventData.position, eventData.pressEventCamera, out local))
+                { EndResize(false); return; }
                 _startPointer = local;
                 _startSize = Target.rect.size;
-                _gesture.Begin();
-                if (!_owning)
-                {
-                    _owning = true;
-                    _owners.Add(this);
-                }
-                GameData.DraggingUIElement = true;
+                CraftingUiPointerOwnership.Reassert();
             }
-            catch (Exception)
-            {
-                EndResize(false);
-            }
+            catch { EndResize(false); }
         }
 
         public void OnDrag(PointerEventData eventData)
         {
-            if (!_gesture.IsActive || Target == null || _parentRect == null) return;
+            if (!_gesture.IsDragging || eventData == null || Target == null || _parentRect == null) return;
             try
             {
+                CraftingUiPointerOwnership.Reassert();
                 Vector2 local;
                 if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(_parentRect, eventData.position, eventData.pressEventCamera, out local)) return;
                 Vector2 delta = local - _startPointer;
@@ -444,58 +598,66 @@ namespace ErenshorCraftingExpanded
                 Target.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, width);
                 Target.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, height);
             }
-            catch (Exception)
-            {
-                EndResize(false);
-            }
+            catch { EndResize(false); }
         }
 
-        public void OnEndDrag(PointerEventData eventData) { EndResize(true); }
-        public void OnPointerUp(PointerEventData eventData) { EndResize(false); }
-        private void OnDisable() { EndResize(true); }
-        private void OnDestroy() { EndResize(true); }
+        private void Update()
+        {
+            if (!_gesture.OwnsPointer) return;
+            CraftingUiPointerOwnership.Reassert();
+            try { if (!Input.GetMouseButton(0)) EndResize(false); } catch { }
+        }
+
+        private void OnApplicationFocus(bool focused) { if (!focused) EndResize(false); }
+        private void OnApplicationPause(bool paused) { if (paused) EndResize(false); }
+        public void OnEndDrag(PointerEventData eventData) { if (eventData == null || eventData.button == PointerEventData.InputButton.Left) EndResize(true); }
+        public void OnPointerUp(PointerEventData eventData) { if (eventData == null || eventData.button == PointerEventData.InputButton.Left) EndResize(false); }
+        private void OnDisable() { EndResize(false); }
+        private void OnDestroy() { EndResize(false); }
+
+        private void Acquire()
+        {
+            if (!_gesture.PointerDown(true)) return;
+            _owners.Add(this);
+            CraftingUiPointerOwnership.Acquire(this);
+        }
 
         private void EndResize(bool notify)
         {
-            bool wasResizing = _gesture.End();
-            Release();
-            if (notify && wasResizing && Target != null)
+            bool completed = _gesture.IsDragging;
+            if (_gesture.Release())
             {
-                try { LayoutRebuilder.ForceRebuildLayoutImmediate(Target); } catch (Exception) { }
-                if (OnResizeCompleted != null)
-                {
-                    try { OnResizeCompleted(Target.rect.width, Target.rect.height); } catch (Exception) { }
-                }
+                _owners.Remove(this);
+                CraftingUiPointerOwnership.Release(this);
+            }
+            _parentRect = null;
+            if (notify && completed && Target != null)
+            {
+                try { LayoutRebuilder.ForceRebuildLayoutImmediate(Target); } catch { }
+                if (OnResizeCompleted != null) { try { OnResizeCompleted(Target.rect.width, Target.rect.height); } catch { } }
             }
         }
 
-        private void Release()
+        private void ForceReleaseLocal()
         {
-            if (!_owning) return;
-            _owning = false;
+            _gesture.Release();
             _owners.Remove(this);
-            if (_owners.Count == 0 && !SuiteDragHandler.HasOwners)
-            {
-                try { GameData.DraggingUIElement = false; } catch (Exception) { }
-            }
+            CraftingUiPointerOwnership.Release(this);
+            _parentRect = null;
         }
 
         internal static void ForceReleaseIfOwned()
         {
-            if (_owners.Count > 0)
+            if (_owners.Count == 0) return;
+            SuiteResizeHandler[] owners = new SuiteResizeHandler[_owners.Count];
+            _owners.CopyTo(owners);
+            for (int i = 0; i < owners.Length; i++)
             {
-                SuiteResizeHandler[] owners = new SuiteResizeHandler[_owners.Count];
-                _owners.CopyTo(owners);
-                for (int i = 0; i < owners.Length; i++)
-                {
-                    SuiteResizeHandler owner = owners[i];
-                    if (owner == null) continue;
-                    owner._gesture.ForceRelease();
-                    owner._owning = false;
-                    owner._parentRect = null;
-                }
-                _owners.Clear();
+                SuiteResizeHandler owner = owners[i];
+                if (owner != null) owner.ForceReleaseLocal();
+                else CraftingUiPointerOwnership.Release((object)owner);
             }
+            _owners.Clear();
         }
     }
 

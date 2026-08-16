@@ -100,7 +100,26 @@ namespace ErenshorCraftingExpanded
             CustomItemDefinition badQty = new CustomItemDefinition { Id = "910000003", Name = "X", DefaultGrantQuantity = 0 };
             if (registry.TryDefine(badQty) != CustomItemDefinitionRejectReason.InvalidDefaultQuantity) return "FAIL invalid default quantity accepted";
 
-            if (registry.Count != 1) return "FAIL only the valid definition should have registered";
+            CustomItemDefinition cave = new CustomItemDefinition { Id = CraftingExpandedItemIds.CaveMushroomId, Name = "Cave Mushroom", DefaultGrantQuantity = 1, VisualKind = CustomItemVisualKind.OrganicFungus };
+            if (registry.TryDefine(cave) != CustomItemDefinitionRejectReason.None) return "FAIL Cave Mushroom definition rejected";
+            CustomItemDefinition bloom = new CustomItemDefinition { Id = CraftingExpandedItemIds.WildBloomId, Name = "Wild Bloom", DefaultGrantQuantity = 1, VisualKind = CustomItemVisualKind.OrganicFlower };
+            if (registry.TryDefine(bloom) != CustomItemDefinitionRejectReason.None) return "FAIL Wild Bloom definition rejected";
+            CustomItemDefinition moss = new CustomItemDefinition { Id = CraftingExpandedItemIds.CaveMossId, Name = "Cave Moss", DefaultGrantQuantity = 1, VisualKind = CustomItemVisualKind.OrganicMoss };
+            if (registry.TryDefine(moss) != CustomItemDefinitionRejectReason.None) return "FAIL Cave Moss definition rejected";
+            CustomItemDefinition root = new CustomItemDefinition { Id = CraftingExpandedItemIds.BlightrootId, Name = "Blightroot", DefaultGrantQuantity = 1, VisualKind = CustomItemVisualKind.OrganicRoot };
+            if (registry.TryDefine(root) != CustomItemDefinitionRejectReason.None) return "FAIL Blightroot definition rejected";
+
+            if (registry.Get(CraftingExpandedItemIds.CaveMushroomId) == null ||
+                registry.Get(CraftingExpandedItemIds.CaveMushroomId).VisualKind != CustomItemVisualKind.OrganicFungus)
+                return "FAIL Cave Mushroom visual kind";
+            if (registry.Get(CraftingExpandedItemIds.WildBloomId).VisualKind != CustomItemVisualKind.OrganicFlower)
+                return "FAIL Wild Bloom visual kind";
+            if (registry.Get(CraftingExpandedItemIds.CaveMossId).VisualKind != CustomItemVisualKind.OrganicMoss)
+                return "FAIL Cave Moss visual kind";
+            if (registry.Get(CraftingExpandedItemIds.BlightrootId).VisualKind != CustomItemVisualKind.OrganicRoot)
+                return "FAIL Blightroot visual kind";
+
+            if (registry.Count != 5) return "FAIL expected five owned resource definitions";
 
             return "PASS custom item registry";
         }
