@@ -9,7 +9,8 @@ research this mod is built against, and the top-level implementation plan for sc
 
 ## Status: Gather-interaction + retained-UI visual candidate (0.2.4)
 
-- **0.2.3 is a focused Foraging interaction/transaction pass over the merged 0.2.2 loop.** It does not
+- **0.2.4 is the current retained-UI visual candidate.** It carries forward the 0.2.3 Foraging
+  interaction/transaction pass over the merged 0.2.2 loop. It does not
   add resources or recipes. A confirmed resource left-click now starts a 1.25-second mod-owned channel
   with the existing red world bar as progress, strict one-attempt inventory authority, deterministic
   cancellation, exactly-once XP/discovery/successful depletion, native successful-loot sound, and brief
