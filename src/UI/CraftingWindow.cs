@@ -14,7 +14,7 @@ namespace ErenshorCraftingExpanded
         private static RectTransform _bodyRect;
         private static RectTransform _footer;
         private static Button _collapse;
-        private static TextMeshProUGUI _collapseLabel;
+        private static RectTransform _collapseChevron;
         private static bool _collapsed;
         private static RectTransform _commissionRoot;
         private static RectTransform _resourceContent;
@@ -64,13 +64,20 @@ namespace ErenshorCraftingExpanded
             RetainedUiKit.AnchorTopStretch(header, 0f, 0f, 0f, CraftingPanelLayoutPolicy.HeaderHeight);
             RetainedUiKit.AddImage(header, RetainedUiKit.Header);
             TextMeshProUGUI title = RetainedUiKit.AddLabel("Title", header, "CRAFTING", 15f, FontStyles.Bold, TextAlignmentOptions.MidlineLeft);
-            RetainedUiKit.Stretch(title.rectTransform, 10f, 0f, 104f, 0f);
-            AddHeaderButton(header, "Collapse", "▲", -70f, ToggleCollapsed, out _collapse);
-            _collapseLabel = _collapse.GetComponentInChildren<TextMeshProUGUI>();
+            RetainedUiKit.Stretch(title.rectTransform, CraftingPanelLayoutPolicy.HeaderTitleLeftInset, 0f,
+                CraftingPanelLayoutPolicy.HeaderRightControlsWidth, 0f);
+            AddHeaderLeftButton(header, "Collapse", "", CraftingPanelLayoutPolicy.HeaderLeftControlInset,
+                ToggleCollapsed, out _collapse);
+            _collapseChevron = _collapse.GetComponent<RectTransform>();
+            StandaloneLauncherVisual.AddVerticalChevron(_collapseChevron, true);
             AddHeaderButton(header, "Reset", "R", -38f, ResetPosition);
             AddHeaderButton(header, "Close", "X", -6f, delegate { CraftingUiStateMachine.Close(); });
-            RetainedUiKit.AddDragSurface("DragSurface", header, _panel, 104f,
+            SuiteDragHandler headerDrag = RetainedUiKit.AddDragSurface("DragSurface", header, _panel,
+                CraftingPanelLayoutPolicy.HeaderRightControlsWidth,
                 delegate { if (_position != null) _position.DragCompleted(_panel); });
+            RectTransform headerDragRect = headerDrag == null ? null : headerDrag.GetComponent<RectTransform>();
+            if (headerDragRect != null)
+                headerDragRect.offsetMin = new Vector2(CraftingPanelLayoutPolicy.HeaderTitleLeftInset - 2f, 0f);
 
             RectTransform bodyViewport;
             RectTransform content;
@@ -576,7 +583,13 @@ namespace ErenshorCraftingExpanded
             _collapsed = collapsed;
             if (_bodyRect != null) _bodyRect.gameObject.SetActive(!collapsed);
             if (_footer != null) _footer.gameObject.SetActive(!collapsed);
-            if (_collapseLabel != null) _collapseLabel.text = collapsed ? "▼" : "▲";
+            if (_collapseChevron != null)
+            {
+                for (int i = _collapseChevron.childCount - 1; i >= 0; i--)
+                    if (_collapseChevron.GetChild(i).name == "Chevron") UnityEngine.Object.Destroy(_collapseChevron.GetChild(i).gameObject);
+                // Expanded points up to collapse; collapsed points down to expand.
+                StandaloneLauncherVisual.AddVerticalChevron(_collapseChevron, !collapsed);
+            }
             bool commissionsEnabled = !collapsed && CraftingConfig.EnableCraftingRequests != null && CraftingConfig.EnableCraftingRequests.Value;
             ResizeForCommissionState(commissionsEnabled);
         }
@@ -601,7 +614,7 @@ namespace ErenshorCraftingExpanded
             _bodyRect = null;
             _footer = null;
             _collapse = null;
-            _collapseLabel = null;
+            _collapseChevron = null;
             _collapsed = false;
             _commissionRoot = null;
             _resourceContent = null;
@@ -650,14 +663,30 @@ namespace ErenshorCraftingExpanded
 
         private static void AddHeaderButton(RectTransform header, string name, string label, float right, Action action, out Button button)
         {
-            Button b = RetainedUiKit.AddButton(name, header, label, action, 28f, 24f, false);
+            Button b = RetainedUiKit.AddButton(name, header, label, action,
+                CraftingPanelLayoutPolicy.HeaderControlWidth, CraftingPanelLayoutPolicy.HeaderControlHeight, false);
             RectTransform r = b.GetComponent<RectTransform>();
             LayoutElement le = r.GetComponent<LayoutElement>();
             if (le != null) UnityEngine.Object.DestroyImmediate(le);
             r.anchorMin = r.anchorMax = new Vector2(1f, 0.5f);
             r.pivot = new Vector2(1f, 0.5f);
             r.anchoredPosition = new Vector2(right, 0f);
-            r.sizeDelta = new Vector2(28f, 24f);
+            r.sizeDelta = new Vector2(CraftingPanelLayoutPolicy.HeaderControlWidth, CraftingPanelLayoutPolicy.HeaderControlHeight);
+            button = b;
+        }
+
+        private static void AddHeaderLeftButton(RectTransform header, string name, string label, float left,
+            Action action, out Button button)
+        {
+            Button b = RetainedUiKit.AddButton(name, header, label, action,
+                CraftingPanelLayoutPolicy.HeaderControlWidth, CraftingPanelLayoutPolicy.HeaderControlHeight, false);
+            RectTransform r = b.GetComponent<RectTransform>();
+            LayoutElement le = r.GetComponent<LayoutElement>();
+            if (le != null) UnityEngine.Object.DestroyImmediate(le);
+            r.anchorMin = r.anchorMax = new Vector2(0f, 0.5f);
+            r.pivot = new Vector2(0f, 0.5f);
+            r.anchoredPosition = new Vector2(left, 0f);
+            r.sizeDelta = new Vector2(CraftingPanelLayoutPolicy.HeaderControlWidth, CraftingPanelLayoutPolicy.HeaderControlHeight);
             button = b;
         }
     }

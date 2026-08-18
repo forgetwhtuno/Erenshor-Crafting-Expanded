@@ -8,12 +8,12 @@ using UnityEngine.SceneManagement;
 
 namespace ErenshorCraftingExpanded
 {
-    [LunarisPlugin("forgetwhtuno.erenshor.craftingexpanded", "0.2.3", "forgetwhtuno",
+    [LunarisPlugin("forgetwhtuno.erenshor.craftingexpanded", "0.2.4", "forgetwhtuno",
         "Horizontal-progression expansion to Erenshor's native crafting: forge quality-of-life, Smithing progression, an experimental commission PoC, and a mod-owned Foraging system.")]
     [LunarisPermission(LunarisPermission.FileAccess | LunarisPermission.Reflection | LunarisPermission.Harmony)]
     public sealed class ErenshorCraftingExpandedPlugin : LunarisPlugin
     {
-        internal const string Version = "0.2.3";
+        internal const string Version = "0.2.4";
         private Harmony _harmony;
         private CraftingExpandedSettings _settings;
         private CraftingSuiteAuraProvider _auraProvider;

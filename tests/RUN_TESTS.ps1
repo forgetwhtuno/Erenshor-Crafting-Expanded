@@ -154,6 +154,29 @@ try {
     $allSource = Get-ChildItem -LiteralPath (Join-Path $ScriptRoot "..\src") -Filter '*.cs' -Recurse | ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw }
     if (($allSource -join "`n") -match '\bOnGUI\s*\(') { throw "Retained UI regression: OnGUI found in Crafting source." }
 
+    $launcherVisual = Get-Content -LiteralPath (Join-Path $ScriptRoot "..\src\StandaloneLauncherVisual.cs") -Raw
+    $launcherSource = Get-Content -LiteralPath (Join-Path $ScriptRoot "..\src\UI\CraftingLauncher.cs") -Raw
+    $windowSource = Get-Content -LiteralPath (Join-Path $ScriptRoot "..\src\UI\CraftingWindow.cs") -Raw
+    if ($launcherVisual -notmatch 'Width\s*=\s*154f' -or $launcherVisual -notmatch 'Height\s*=\s*32f' -or
+        $launcherVisual -notmatch 'GripWidth\s*=\s*20f' -or $launcherVisual -notmatch '"GripDot"' -or
+        $launcherSource -notmatch 'StyleGrip\(grip\)' -or $windowSource -notmatch 'AddVerticalChevron\(_collapseChevron, !collapsed\)') {
+        throw "Crafting Forgotten Roads launcher/chevron visual contract failed."
+    }
+
+    if ($windowSource.Contains([char]0x25B2) -or $windowSource.Contains([char]0x25BC) -or $windowSource.Contains([char]0x25BE) -or $windowSource.Contains([char]0x25B8)) { throw "Crafting header guard failed: Unicode collapse glyph dependency introduced." }
+    if ($windowSource -notmatch 'AddHeaderLeftButton\(header, "Collapse"' -or
+        $windowSource -notmatch 'HeaderTitleLeftInset' -or
+        $windowSource -notmatch 'HeaderRightControlsWidth') {
+        throw "Crafting header guard failed: collapse control is not immediately left of the title."
+    }
+    if ([regex]::Matches($windowSource, 'AddVerticalChevron\(_collapseChevron').Count -ne 2) {
+        throw "Crafting header guard failed: collapse graphic creation/update path changed unexpectedly."
+    }
+    if ($windowSource -notmatch 'AddHeaderButton\(header, "Reset", "R", -38f' -or
+        $windowSource -notmatch 'AddHeaderButton\(header, "Close", "X", -6f') {
+        throw "Crafting header guard failed: real Reset/X right-side chrome regressed."
+    }
+
     Write-Host "Source contract checks: PASS" -ForegroundColor Green
 }
 finally {

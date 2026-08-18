@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.4 - Forgotten Roads launcher/header chrome
+
+Current release candidate. It carries forward the 0.2.3 gather-interaction/transaction work below
+rather than replacing it. Native production recipes remain fail-closed and OFF until proven live,
+and no row of the suite-level ordered live matrix is certified for this candidate yet.
+
+- Standardized the standalone retained-uGUI launcher at 154x32 with programmatic grip marks and collection hover/pressed colors.
+- Replaced font-dependent collapse triangles with mod-owned Image chevrons while preserving panel behavior.
+- Clarified README release-gate wording: the 0.2.4 candidate is gated by the suite-level ordered live matrix, and historical 0.2.3 evidence is not live proof for 0.2.4.
+
 ## 0.2.3 - Foraging gather interaction feedback / transaction hardening
 
 - Replaced instant successful gather presentation with an explicit `Available -> Gathering -> GrantPending -> Depleted` transaction. Confirmed left-click starts a configurable 1.25-second channel (runtime-bounded to 1.0-1.5s); the existing red resource bar drains during the channel and returns full on cancellation.

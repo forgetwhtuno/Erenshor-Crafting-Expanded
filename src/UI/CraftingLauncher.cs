@@ -7,8 +7,8 @@ namespace ErenshorCraftingExpanded
 {
     internal sealed class CraftingLauncher
     {
-        internal const float Width = 132f;
-        internal const float Height = 30f;
+        internal const float Width = StandaloneLauncherVisual.Width;
+        internal const float Height = StandaloneLauncherVisual.Height;
         private GameObject _root;
         private RectTransform _panel;
         private TextMeshProUGUI _label;
@@ -31,12 +31,16 @@ namespace ErenshorCraftingExpanded
             RetainedUiKit.AddImage(grip, RetainedUiKit.Header);
             TextMeshProUGUI diamond = RetainedUiKit.AddLabel("GripLabel", grip, "◇", 14f, FontStyles.Bold, TextAlignmentOptions.Center);
             RetainedUiKit.Stretch(diamond.rectTransform, 0f, 0f, 0f, 0f);
+            diamond.gameObject.SetActive(false);
+            StandaloneLauncherVisual.StyleGrip(grip);
 
             Button button = RetainedUiKit.AddButton("OpenCrafting", _panel, "CRAFTING", delegate { if (_toggle != null) _toggle(); }, Width - 20f, Height, false);
             RectTransform br = button.GetComponent<RectTransform>();
             br.anchorMin = br.anchorMax = Vector2.zero; br.pivot = Vector2.zero; br.anchoredPosition = new Vector2(20f, 0f); br.sizeDelta = new Vector2(Width - 20f, Height);
             LayoutElement le = br.GetComponent<LayoutElement>(); if (le != null) UnityEngine.Object.DestroyImmediate(le);
             _label = button.GetComponentInChildren<TextMeshProUGUI>();
+            StandaloneLauncherVisual.StyleButton(button, _label);
+            StandaloneLauncherVisual.StyleRoot(_panel);
 
             _position = new RetainedPosition(x, y, 0.84f, 0.76f, persist);
             SuiteDragHandler drag = grip.gameObject.AddComponent<SuiteDragHandler>(); drag.Target = _panel;
@@ -51,7 +55,7 @@ namespace ErenshorCraftingExpanded
             if (_root.activeSelf != visible) _root.SetActive(visible);
             if (!visible) return;
             if (_position != null) _position.Resolve(_panel);
-            if (_label != null) _label.text = open ? "CRAFTING •" : "CRAFTING";
+            if (_label != null) _label.text = open ? "CRAFTING [OPEN]" : "CRAFTING";
         }
 
         internal void ResetPosition() { if (_position != null) _position.Reset(_panel); }
