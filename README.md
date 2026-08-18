@@ -115,8 +115,14 @@ research this mod is built against, and the top-level implementation plan for sc
 
 ## Installation
 
-For the 0.2.3 gather-interaction release gate, use [`INSTALL.md`](INSTALL.md) and [`LIVE_TEST.md`](LIVE_TEST.md).
-They supersede stale individual-workstream test instructions when there is a conflict.
+**0.2.4 is the current release candidate.** It carries forward the 0.2.3 gather-interaction and
+transaction work rather than replacing it, so 0.2.3 notes below remain accurate as history — but the
+gate that matters is 0.2.4's. Live validation for this candidate is driven by the suite-level ordered
+matrix in `Erenshor-Mod-Suite/docs/LIVE_TEST_MATRIX.md`, which supersedes stale individual-workstream
+test instructions when there is a conflict. Historical 0.2.3 evidence is not live proof for 0.2.4:
+the exact 0.2.4 candidate must be rebuilt, installed, and run before any row is certified.
+
+Native production recipes remain fail-closed and OFF until proven live; that gate is unchanged.
 
 This is a **native Lunaris plugin** — BepInEx is no longer required for this version. Requires
 Lunaris installed in your Erenshor install. The compiled DLL is placed directly in
@@ -171,7 +177,7 @@ visible so the player cannot be stranded.
 
 ### Foraging interaction and presentation
 
-### Gather transaction feedback (0.2.3)
+### Gather transaction feedback (introduced 0.2.3, current in 0.2.4)
 
 A confirmed in-range left-click now starts a **1.25-second mod-owned gather transaction** instead of instantly removing the plant. The existing red world resource bar drains left-to-right while the player remains free to orbit the camera. Meaningful movement, range/LOS loss, jump/fall, damage, typing, zoning, character change, gameplay disable, unload, or a different-resource click cancels the current gather without awarding anything. Re-clicking the same active herb is consumed/ignored and does not restart the timer.
 
